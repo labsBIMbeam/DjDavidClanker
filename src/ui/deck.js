@@ -2,7 +2,7 @@ import { h, clear, fmtTime, fader } from './dom.js';
 import { setImage } from '../lib/artwork.js';
 import { SEC_PER_REV, FX_TYPES } from '../audio/engine.js';
 import { Platter } from './platter.js';
-import { Scope } from './scope.js';
+import { LevelMeter } from './meter.js';
 
 const DIVISIONS = [
   ['1/4', 1],
@@ -94,13 +94,10 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
     }, label));
   const scratchRow = h('div', { class: 'scratch-row' }, ...scratchBtns);
 
-  // Live signal straight off this deck's analyser — the moving counterpart to
-  // the static overview waveform above it.
-  const scope = Scope(() => (deck._graph ? deck._graph.analyser : null), {
-    height: 38,
-    mode: 'mirror',
-    colors: accent === 'a' ? ['#8a5410', '#f7931a'] : ['#8a6f22', '#f3c244'],
-  });
+  // Classic channel meter under the wave — level with red overshoot,
+  // replacing the old oscilloscope view.
+  const meter = LevelMeter(() => deck.level(), { orient: 'h', length: 560, thickness: 14 });
+  const meterRow = h('div', { class: 'deck-meter' }, h('span', { class: 'lbl-sub' }, 'LEVEL'), meter.canvas);
 
   const btnPlay = h('button', { class: 'btn btn-play', title: 'Play / pause (space)' }, '▶');
   const btnCue = h('button', { class: 'btn btn-cue', title: 'Set cue / jump to cue' }, 'CUE');
@@ -403,7 +400,11 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
   platter.addEventListener('pointerup', platterUp);
   platter.addEventListener('pointercancel', platterUp);
 
-  const root = h('div', { class: `deck deck-${deck.id}`, dataset: { accent } },
+  // The deck is mounted as two fragments so the app can run the crossfader
+  // full-width between top (head/FX/wave/meter) and bottom (jog/tempo).
+  // EQ and channel strip are exposed separately — they live in the middle
+  // mixer column, like on a real 2-channel battle mixer.
+  const top = h('div', { class: `deck deck-top deck-${deck.id}`, dataset: { accent } },
     h('div', { class: 'deck-head' },
       art,
       h('div', { class: 'deck-meta' },
@@ -416,7 +417,10 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
     ),
     fxSection,
     waveWrap,
-    scope.root,
+    meterRow,
+  );
+
+  const bottom = h('div', { class: `deck deck-bottom deck-${deck.id}`, dataset: { accent } },
     h('div', { class: 'deck-body' },
       h('div', { class: 'deck-jog' }, platter, jogHint,
         h('div', { class: 'transport' }, btnRew, btnCue, btnPlay),
@@ -439,13 +443,21 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
           h('div', { class: 'pitch-btns' }, btnTempoRange, btnTempoReset),
         ),
       ),
-      h('div', { class: 'deck-eq' },
-        h('div', { class: 'eq-row' }, eqHigh.wrap, eqMid.wrap, eqLow.wrap),
-        h('div', { class: 'filter-row' }, btnFilterReset, filterFader),
-      ),
-      h('div', { class: 'deck-chan' }, h('label', { class: 'lbl' }, 'VOL'), h('div', { class: 'chan-row' }, volFader, vu), btnPfl),
     ),
   );
+
+  // Channel strip for the middle mixer column.
+  const channelStrip = h('div', { class: `deck channel-strip deck-${deck.id}`, dataset: { accent } },
+    h('div', { class: 'lbl' }, `CH ${deck.id}`),
+    h('div', { class: 'deck-eq' },
+      h('div', { class: 'eq-row' }, eqHigh.wrap, eqMid.wrap, eqLow.wrap),
+      h('div', { class: 'filter-row' }, btnFilterReset, filterFader),
+    ),
+    h('div', { class: 'deck-chan' }, h('label', { class: 'lbl' }, 'VOL'), h('div', { class: 'chan-row' }, volFader, vu), btnPfl),
+  );
+
+  const root = top; // dnd + legacy callers get the top fragment
+  const roots = [top, bottom, channelStrip];
 
   /* ------------------------- rendering ------------------------- */
 
@@ -689,7 +701,7 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
     // The disc is drawn from the real rate, so brake, backspin and
     // hand-scratch all read correctly instead of a fixed CSS spin.
     record.draw();
-    scope.draw();
+    meter.draw();
     platter.classList.toggle('reverse', rate < -0.05);
     platter.classList.toggle('scratching', deck.scratching || deck.rewinding);
     platter.classList.toggle('spinning', Math.abs(rate) > 0.05);
@@ -722,5 +734,5 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
   ro.observe(waveWrap);
 
   render();
-  return { root, render, tick, tempoFader, pitchFader: tempoFader, volFader };
+  return { root, roots, top, bottom, channelStrip, render, tick, tempoFader, pitchFader: tempoFader, volFader };
 }

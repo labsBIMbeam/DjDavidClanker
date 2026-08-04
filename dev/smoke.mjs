@@ -36,6 +36,24 @@ const frame = await (await page.waitForSelector('#frame')).contentFrame();
 await frame.waitForSelector('.deck-A', { timeout: 15000 });
 check('napplet booted in sandboxed iframe', true);
 
+// Raw page.mouse gestures need PAGE coordinates. locator.boundingBox() on a
+// sandboxed-iframe element returns frame-relative values here, so compute the
+// page position deterministically: iframe rect + in-frame client rect.
+const pageRect = async (sel) => {
+  // Center the element in the frame viewport first — deterministic position
+  // regardless of whatever earlier interactions scrolled the frame to. The
+  // iframe offset is measured per call: the shell's log grows during the run
+  // and pushes the iframe down, so a boot-time measurement goes stale.
+  await frame.evaluate((s) => document.querySelector(s).scrollIntoView({ block: 'center', behavior: 'instant' }), sel);
+  await page.waitForTimeout(80);
+  const frameEl = await page.locator('#frame').boundingBox();
+  const r = await frame.evaluate((s) => {
+    const b = document.querySelector(s).getBoundingClientRect();
+    return { x: b.x, y: b.y, width: b.width, height: b.height };
+  }, sel);
+  return { x: frameEl.x + r.x, y: frameEl.y + r.y, width: r.width, height: r.height };
+};
+
 // window.napplet must exist and carry the domains the shell granted.
 const domains = await frame.evaluate(() => Object.keys(window.napplet || {}));
 check('window.napplet injected', domains.length > 0, domains.join(','));
@@ -118,7 +136,7 @@ await frame.waitForFunction(() => {
 check('reversed buffer built (scratch ready)', true);
 
 // Drag the platter backwards through roughly half a turn.
-const box = await frame.locator('.deck-A .platter').boundingBox();
+const box = await pageRect('.deck-A .platter');
 const cx = box.x + box.width / 2;
 const cy = box.y + box.height / 2;
 const r = box.width * 0.36;
@@ -152,7 +170,7 @@ check('deck returns to normal playback after release', afterRelease === 'source'
 
 // Dynamic rewind: the longer the hold, the further back it spins.
 const beforeRew = await frame.evaluate(() => window.__djclanker.decks.A.position);
-const rew = await frame.locator('.deck-A .btn-rew').boundingBox();
+const rew = await pageRect('.deck-A .btn-rew');
 await page.mouse.move(rew.x + rew.width / 2, rew.y + rew.height / 2);
 await page.mouse.down();
 await page.waitForTimeout(900);
@@ -221,39 +239,28 @@ await page.waitForTimeout(900);
 const turnsB = await frame.evaluate(() => window.__djclanker.decks.A.platterTurns);
 check('disc rotates with playback', turnsB > turnsA, `+${(turnsB - turnsA).toFixed(2)} revolutions`);
 
-// Live sound waves: deck scope and master scope must both draw non-empty frames.
-const scopeLit = async (sel) => frame.evaluate((s) => {
+// Classic meters: channel meter under the wave and the vertical master meter
+// must both light up while audio plays (fire segments, red overshoot zone).
+const meterLit = async (sel) => frame.evaluate((s) => {
   const c = document.querySelector(s);
   if (!c) return -1;
   const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
   let lit = 0;
-  for (let i = 3; i < d.length; i += 4 * 31) if (d[i] > 10) lit++;
+  for (let i = 0; i < d.length; i += 4 * 31) {
+    if (d[i] > 120 && d[i + 3] > 200) lit++; // strong warm pixels, not the idle track
+  }
   return lit;
 }, sel);
 
-let deckScope = 0;
-let masterScope = 0;
+let deckMeter = 0;
+let masterMeter = 0;
 for (let i = 0; i < 20; i++) {
-  deckScope = Math.max(deckScope, await scopeLit('.deck-A .scope-canvas'));
-  masterScope = Math.max(masterScope, await scopeLit('.master-scope .scope-canvas'));
+  deckMeter = Math.max(deckMeter, await meterLit('.deck-A .meter-canvas'));
+  masterMeter = Math.max(masterMeter, await meterLit('.master-col .meter-canvas'));
   await page.waitForTimeout(60);
 }
-check('deck sound wave draws', deckScope > 30, `${deckScope} lit`);
-check('master sound wave draws', masterScope > 30, `${masterScope} lit`);
-
-// Scope view modes cycle without throwing.
-const modeBtn = frame.locator('.master-scope .scope-mode');
-const m0 = await modeBtn.textContent();
-await modeBtn.click();
-await page.waitForTimeout(400);
-const m1 = await modeBtn.textContent();
-await modeBtn.click();
-await page.waitForTimeout(400);
-const m2 = await modeBtn.textContent();
-check('scope modes cycle', m0 !== m1 && m1 !== m2, `${m0} → ${m1} → ${m2}`);
-const barsLit = await scopeLit('.master-scope .scope-canvas');
-check('spectrum view draws', barsLit > 30, `${barsLit} lit`);
-await modeBtn.click();
+check('channel meter lights up', deckMeter > 10, `${deckMeter} lit`);
+check('master meter lights up', masterMeter > 10, `${masterMeter} lit`);
 
 await page.screenshot({ path: `${OUT}-desktop.png`, fullPage: true });
 

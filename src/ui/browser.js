@@ -54,6 +54,26 @@ export function Browser({ onLoadDeck, onZap, capabilities }) {
     }, label),
   );
 
+  // Local files accumulate for the session — every pick or deck drop joins
+  // the list, so earlier files stay reachable without re-picking. (File
+  // handles cannot be persisted through the storage domain, so the list
+  // lives and dies with the page.)
+  const localList = [];
+
+  function addLocalTracks(tracks) {
+    for (const t of tracks) {
+      if (t && t.localFile && !localList.some((x) => x.title === t.title && x.artist === t.artist)) {
+        localList.push(t);
+      }
+    }
+    renderSide();
+  }
+
+  function showLocal() {
+    setItems([...localList], 'Local files', `${localList.length} this session — they stay on your machine, no upload`);
+    renderList();
+  }
+
   const localInput = h('input', {
     class: 'local-input',
     type: 'file',
@@ -63,8 +83,8 @@ export function Browser({ onLoadDeck, onZap, capabilities }) {
     onchange: () => {
       const files = [...localInput.files];
       if (!files.length) return;
-      setItems(files.map(trackFromFile), 'Local files', `${files.length} files — they stay on your machine, no upload`);
-      renderList();
+      addLocalTracks(files.map(trackFromFile));
+      showLocal();
       localInput.value = '';
     },
   });
@@ -362,6 +382,15 @@ export function Browser({ onLoadDeck, onZap, capabilities }) {
         }, 'Load all'));
       }
       sideEl.appendChild(g2);
+
+      if (localList.length) {
+        const g3 = h('div', { class: 'side-group' }, h('div', { class: 'side-h' }, `Local files (${localList.length})`));
+        for (const t of localList.slice(0, 20)) {
+          g3.appendChild(chip(`📁 ${t.title}`, showLocal));
+        }
+        g3.appendChild(h('button', { class: 'btn btn-ghost', onclick: showLocal }, 'Show local files'));
+        sideEl.appendChild(g3);
+      }
     } else if (tab === 'nostr') {
       sideEl.appendChild(h('div', { class: 'side-group' },
         h('div', { class: 'side-h' }, 'Playlists (kind 30003)'),
@@ -413,5 +442,5 @@ export function Browser({ onLoadDeck, onZap, capabilities }) {
   renderSide();
   loadCharts(40);
 
-  return { root, currentItems, addToCrate, loadCharts };
+  return { root, currentItems, addToCrate, loadCharts, addLocalTracks };
 }

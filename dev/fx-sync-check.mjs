@@ -80,8 +80,16 @@ await frame.locator('.deck-A .zoom-in').click();
 const z1 = parseFloat(await frame.locator('.deck-A .wave-wrap').getAttribute('data-zoom'));
 check('waveform zooms via buttons', z1 > 2, `×${z1}`);
 
-const wb = await frame.locator('.deck-A .wave-wrap').boundingBox();
-await page.mouse.move(wb.x + wb.width / 2, wb.y + wb.height / 2);
+// Page coordinates for the raw wheel gesture: iframe rect + in-frame rect
+// (boundingBox on sandboxed-iframe elements is frame-relative here; the
+// iframe offset is measured now, after the shell log has grown).
+const frameEl = await page.locator('#frame').boundingBox();
+await frame.locator('.deck-A .wave-wrap').scrollIntoViewIfNeeded();
+const wb = await frame.evaluate(() => {
+  const b = document.querySelector('.deck-A .wave-wrap').getBoundingClientRect();
+  return { x: b.x, y: b.y, width: b.width, height: b.height };
+});
+await page.mouse.move(frameEl.x + wb.x + wb.width / 2, frameEl.y + wb.y + wb.height / 2);
 await page.mouse.wheel(0, -240);
 await page.waitForTimeout(200);
 const z2 = parseFloat(await frame.locator('.deck-A .wave-wrap').getAttribute('data-zoom'));
