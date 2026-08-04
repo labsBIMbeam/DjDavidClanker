@@ -26,7 +26,7 @@ export function openModal({ title, body, actions = [], onClose }) {
   const panel = h('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
     h('div', { class: 'modal-head' },
       h('div', { class: 'modal-title' }, title),
-      h('button', { class: 'btn btn-mini', onclick: close, 'aria-label': 'Schließen' }, '×'),
+      h('button', { class: 'btn btn-mini', onclick: close, 'aria-label': 'Close' }, '×'),
     ),
     bodyEl,
     actions.length ? h('div', { class: 'modal-actions' }, ...actions.map((a) =>

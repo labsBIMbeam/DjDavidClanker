@@ -19,14 +19,14 @@ const DIVISIONS = [
 export function DeckPanel(deck, { onZap, onEject, accent }) {
   const wave = h('canvas', { class: 'wave', height: 120 });
 
-  /* Zoom: ×1 = ganzer Track (gecachtes Overview), darüber ein Playhead-
-     zentriertes Fenster, das live aus den Hi-Res-Peaks gezeichnet wird. */
+  /* Zoom: ×1 = whole track (cached overview); beyond that a playhead-centered
+     window rendered live from the fine peak set. */
   const view = { zoom: 1 };
-  const zoomOut = h('button', { class: 'btn btn-mini zoom-out', title: 'Waveform verkleinern' }, '−');
-  const zoomLabel = h('button', { class: 'btn btn-mini zoom-fit', title: 'Zoom zurücksetzen (ganzer Track)' }, '×1');
-  const zoomIn = h('button', { class: 'btn btn-mini zoom-in', title: 'Waveform vergrößern' }, '+');
+  const zoomOut = h('button', { class: 'btn btn-mini zoom-out', title: 'Zoom the waveform out' }, '−');
+  const zoomLabel = h('button', { class: 'btn btn-mini zoom-fit', title: 'Reset zoom (whole track)' }, '×1');
+  const zoomIn = h('button', { class: 'btn btn-mini zoom-in', title: 'Zoom the waveform in' }, '+');
   const zoomBox = h('div', { class: 'wave-zoom' }, zoomOut, zoomLabel, zoomIn);
-  const waveWrap = h('div', { class: 'wave-wrap' }, wave, zoomBox, h('div', { class: 'wave-empty' }, 'Kein Track geladen'));
+  const waveWrap = h('div', { class: 'wave-wrap' }, wave, zoomBox, h('div', { class: 'wave-empty' }, 'No track loaded'));
 
   function setZoom(z) {
     view.zoom = Math.max(1, Math.min(64, z));
@@ -55,21 +55,21 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
 
   const art = h('div', { class: 'deck-art' }, h('div', { class: 'deck-art-ph' }, '⏻'));
   const title = h('div', { class: 'deck-title' }, '—');
-  const artist = h('div', { class: 'deck-artist' }, 'Deck ' + deck.id + ' frei');
+  const artist = h('div', { class: 'deck-artist' }, 'Deck ' + deck.id + ' empty');
   const timeCur = h('span', { class: 'time-cur' }, '0:00');
   const timeRem = h('span', { class: 'time-rem' }, '-0:00');
   const badge = h('span', { class: 'badge badge-mode' }, '');
 
   const LOOP_BEATS = [1, 2, 4, 8];
-  const btnLoopIn = h('button', { class: 'btn btn-mini btn-loopin', title: 'Loop-Startpunkt setzen', onclick: () => deck.loopIn() }, 'IN');
-  const btnLoopOut = h('button', { class: 'btn btn-mini btn-loopout', title: 'Loop hier schließen', onclick: () => deck.loopOut() }, 'OUT');
+  const btnLoopIn = h('button', { class: 'btn btn-mini btn-loopin', title: 'Set the loop-in point', onclick: () => deck.loopIn() }, 'IN');
+  const btnLoopOut = h('button', { class: 'btn btn-mini btn-loopout', title: 'Close the loop here', onclick: () => deck.loopOut() }, 'OUT');
   const beatLoopBtns = LOOP_BEATS.map((b) =>
     h('button', {
       class: 'btn btn-mini btn-loopbeat',
-      title: `${b}-Beat-Loop auf dem Grid`,
+      title: `${b}-beat loop on the grid`,
       onclick: () => deck.setLoopBeats(b),
     }, String(b)));
-  const btnLoopExit = h('button', { class: 'btn btn-mini btn-loopexit', title: 'Loop verlassen', onclick: () => deck.exitLoop() }, 'EXIT');
+  const btnLoopExit = h('button', { class: 'btn btn-mini btn-loopexit', title: 'Exit the loop', onclick: () => deck.exitLoop() }, 'EXIT');
   const loopRow = h('div', { class: 'loop-row' },
     h('span', { class: 'lbl-sub' }, 'LOOP'), btnLoopIn, btnLoopOut,
     h('span', { class: 'loop-sep' }), ...beatLoopBtns, btnLoopExit,
@@ -87,18 +87,18 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
     colors: accent === 'a' ? ['#8a5410', '#f7931a'] : ['#8a6f22', '#f3c244'],
   });
 
-  const btnPlay = h('button', { class: 'btn btn-play', title: 'Play / Pause (Leertaste)' }, '▶');
-  const btnCue = h('button', { class: 'btn btn-cue', title: 'Cue setzen / anspringen' }, 'CUE');
+  const btnPlay = h('button', { class: 'btn btn-play', title: 'Play / pause (space)' }, '▶');
+  const btnCue = h('button', { class: 'btn btn-cue', title: 'Set cue / jump to cue' }, 'CUE');
   const btnRew = h('button', {
     class: 'btn btn-rew',
-    title: 'Rewind — gedrückt halten, wird schneller je länger du hältst',
+    title: 'Rewind — hold it, the longer you hold the faster it spins',
   }, '◀◀');
-  const btnEject = h('button', { class: 'btn btn-ghost', title: 'Deck leeren', onclick: () => onEject(deck) }, '⏏');
-  const btnZap = h('button', { class: 'btn btn-zap', title: 'Value4Value Zap an den Artist' }, '⚡ ZAP');
+  const btnEject = h('button', { class: 'btn btn-ghost', title: 'Clear the deck', onclick: () => onEject(deck) }, '⏏');
+  const btnZap = h('button', { class: 'btn btn-zap', title: 'Value4Value zap to the artist' }, '⚡ ZAP');
 
   const btnVinyl = h('button', {
     class: 'btn btn-mini btn-vinyl',
-    title: 'Vinyl: Scratch, Brake, Spin-up · CDJ: sofortiger Start, Jog = Pitchbend',
+    title: 'Vinyl: scratch, brake, spin-up · CDJ: instant start, jog = pitchbend',
     onclick: () => {
       deck.vinylMode = !deck.vinylMode;
       deck.emit('mode');
@@ -123,10 +123,10 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
     },
   });
   const bpmLive = h('span', { class: 'bpm-live' }, '—');
-  const btnSync = h('button', { class: 'btn btn-sync', title: 'Tempo und Beat-Phase aufs andere Deck ziehen' }, 'SYNC');
+  const btnSync = h('button', { class: 'btn btn-sync', title: 'Latch tempo and beat phase onto the other deck' }, 'SYNC');
   const btnDrop = h('button', {
     class: 'btn btn-mini btn-drop',
-    title: 'Auf der nächsten Takt-1 des anderen Decks starten — Tempo gesynct, Start ab Cue (auf die eigene 1 gesnappt). Nochmal drücken bricht ab',
+    title: 'Start on the other deck\'s next bar-1 — tempo synced, entry from cue snapped to your own 1. Press again to cancel',
     onclick: () => deck.emit('drop-request'),
   }, 'DROP');
 
@@ -138,7 +138,7 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
   });
   const btnTempoRange = h('button', {
     class: 'btn btn-mini',
-    title: 'Tempo-Bereich umschalten',
+    title: 'Cycle the tempo range',
     onclick: () => {
       const ranges = [8, 16, 50];
       const next = ranges[(ranges.indexOf(deck.tempoRange) + 1) % ranges.length];
@@ -150,7 +150,7 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
     },
   }, '±8');
   const btnTempoReset = h('button', {
-    class: 'btn btn-mini', title: 'Tempo auf 0 zurück',
+    class: 'btn btn-mini', title: 'Reset tempo to 0',
     onclick: () => { deck.setTempo(0); tempoFader.value = '0'; },
   }, '0');
 
@@ -181,19 +181,19 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
     onInput: (v) => deck.setFilter(v),
   });
   const btnFilterReset = h('button', {
-    class: 'btn btn-mini', title: 'Filter neutral',
+    class: 'btn btn-mini', title: 'Filter to neutral',
     onclick: () => { deck.setFilter(0); filterFader.value = '0'; },
   }, 'FLT');
 
   const volFader = fader({
-    min: 0, max: 1, step: 0.01, value: 1, orient: 'v', label: `Lautstärke Deck ${deck.id}`,
+    min: 0, max: 1, step: 0.01, value: 1, orient: 'v', label: `Volume deck ${deck.id}`,
     className: 'chan',
     onInput: (v) => deck.setVolume(v),
   });
   const vu = h('div', { class: 'vu' }, h('div', { class: 'vu-fill' }));
   const btnPfl = h('button', {
     class: 'btn btn-mini btn-pfl',
-    title: 'Vorhören: Deck auf den Kopfhörer-Bus legen (pre-fader)',
+    title: 'Pre-listen: route this deck onto the headphone bus (pre-fader)',
     onclick: () => deck.setCue(),
   }, '🎧');
 
@@ -277,12 +277,12 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
   function fxSlot(i) {
     const sel = h('select', {
       class: 'fx-sel',
-      'aria-label': `Effekt für Slot ${i + 1}, Deck ${deck.id}`,
+      'aria-label': `Effect for slot ${i + 1}, deck ${deck.id}`,
       onchange: (e) => deck.setFxSlot(i, e.target.value),
     }, ...FX_TYPES.map((t) => h('option', { value: t }, FX_LABELS[t])));
     const btn = h('button', {
       class: 'btn btn-fx',
-      title: 'Effekt ein/aus',
+      title: 'Effect on/off',
       onclick: () => deck.toggleFx(deck.fxSlots[i]),
     }, '');
     const bodyWrap = h('div');
@@ -405,7 +405,7 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
       h('div', { class: 'deck-tempo' },
         h('div', { class: 'bpm-box' },
           h('label', { class: 'lbl' }, 'BPM'),
-          h('div', { class: 'bpm-live-wrap', title: 'Effektive BPM — folgt dem Tempofader' }, bpmLive),
+          h('div', { class: 'bpm-live-wrap', title: 'Effective BPM — follows the tempo fader' }, bpmLive),
           h('div', { class: 'bpm-base-row' }, h('span', { class: 'lbl-sub' }, 'BASE'), bpmField),
         ),
         btnSync,
@@ -578,14 +578,14 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
       waveWrap.classList.toggle('has-track', true);
     } else {
       title.textContent = '—';
-      artist.textContent = `Deck ${deck.id} frei`;
+      artist.textContent = `Deck ${deck.id} empty`;
       clear(art).appendChild(h('div', { class: 'deck-art-ph' }, '⏻'));
       waveWrap.classList.remove('has-track');
     }
 
     badge.textContent =
-      deck.status === 'loading' ? 'LADEN…'
-      : deck.status === 'error' ? 'FEHLER'
+      deck.status === 'loading' ? 'LOADING…'
+      : deck.status === 'error' ? 'ERROR'
       : deck.backend === 'element' ? 'BASIC'
       : deck.backend === 'buffer' ? 'FULL'
       : '';
@@ -597,8 +597,8 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
       : ''
     }`;
     badge.title = deck.status === 'error' ? deck.error
-      : deck.backend === 'element' ? 'Basic-Modus: nur Volume-Crossfade und Tempo, kein EQ/Filter/FX/Scratch'
-      : deck.backend === 'buffer' ? 'Voller WebAudio-Pfad: EQ, Filter, FX, Waveform, Scratch' : '';
+      : deck.backend === 'element' ? 'Basic mode: volume crossfade and tempo only — no EQ/filter/FX/scratch'
+      : deck.backend === 'buffer' ? 'Full WebAudio path: EQ, filter, FX, waveform, scratch' : '';
 
     btnPlay.textContent = deck.playing ? '❚❚' : '▶';
     btnPlay.classList.toggle('on', deck.playing);
@@ -628,7 +628,7 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
     btnVinyl.disabled = !deck.canVinyl;
     jogHint.textContent = vinyl ? 'SCRATCH' : 'JOG';
     platter.classList.toggle('vinyl', vinyl);
-    platter.title = vinyl ? 'Vinyl: ziehen zum Scratchen' : 'Jog: ziehen für Pitchbend';
+    platter.title = vinyl ? 'Vinyl: drag to scratch' : 'Jog: drag for pitchbend';
 
     bpmField.value = deck.bpm ? deck.bpm.toFixed(1) : '';
     bpmField.classList.toggle('guess', !deck.bpmManual && deck.bpmConfidence > 0 && deck.bpmConfidence < 0.35);

@@ -58,7 +58,7 @@ await frame.locator('input.local-input').setInputFiles({
   mimeType: 'audio/wav',
   buffer: makeWav(),
 });
-await frame.locator('.browser-h1', { hasText: 'Lokale Dateien' }).waitFor({ timeout: 10000 });
+await frame.locator('.browser-h1', { hasText: 'Local files' }).waitFor({ timeout: 10000 });
 const rows = await frame.locator('.track-row').count();
 check('local file appears as a row', rows === 1, `${rows} row(s)`);
 const title = (await frame.locator('.track-row .row-title').first().textContent()).trim();

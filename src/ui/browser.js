@@ -31,20 +31,20 @@ export function Browser({ onLoadDeck, onZap, capabilities }) {
     class: 'search-input',
     type: 'search',
     placeholder: 'Artist, Album, Track…',
-    'aria-label': 'Wavlake durchsuchen',
+    'aria-label': 'Search Wavlake',
     onkeydown: (e) => { if (e.key === 'Enter') runSearch(); },
   });
 
   const npubInput = h('input', {
     class: 'search-input',
     type: 'text',
-    placeholder: 'npub… (leer = eigenes Profil)',
-    'aria-label': 'Nostr Pubkey',
+    placeholder: 'npub… (empty = your own profile)',
+    'aria-label': 'Nostr pubkey',
   });
 
   const tabs = [
     ['charts', 'Charts'],
-    ['search', 'Suche'],
+    ['search', 'Search'],
     ['crate', 'Crate'],
     ['nostr', 'Nostr'],
   ].map(([key, label]) =>
@@ -63,16 +63,16 @@ export function Browser({ onLoadDeck, onZap, capabilities }) {
     onchange: () => {
       const files = [...localInput.files];
       if (!files.length) return;
-      setItems(files.map(trackFromFile), 'Lokale Dateien', `${files.length} Dateien — bleiben auf deinem Rechner, kein Upload`);
+      setItems(files.map(trackFromFile), 'Local files', `${files.length} files — they stay on your machine, no upload`);
       renderList();
       localInput.value = '';
     },
   });
   const btnLocal = h('button', {
     class: 'btn btn-mini btn-local',
-    title: 'Lokale Audiodateien öffnen (oder direkt aufs Deck ziehen)',
+    title: 'Open local audio files (or drop them straight onto a deck)',
     onclick: () => localInput.click(),
-  }, '📁 LOKAL');
+  }, '📁 LOCAL');
 
   const root = h('div', { class: 'browser' },
     h('div', { class: 'browser-tabs' }, ...tabs, h('span', { class: 'tabs-spacer' }), btnLocal, localInput),
@@ -105,18 +105,18 @@ export function Browser({ onLoadDeck, onZap, capabilities }) {
   /* ------------------------------ sources ------------------------------ */
 
   async function loadCharts(limit = 40) {
-    await guard(async () => setItems(await wl.topTracks(limit), `Wavlake Top ${limit}`, 'Sortiert nach Sats der letzten 7 Tage'), 'Charts');
+    await guard(async () => setItems(await wl.topTracks(limit), `Wavlake Top ${limit}`, 'Ranked by sats over the last 7 days'), 'Charts');
   }
 
   async function loadNew() {
-    await guard(async () => setItems(await wl.newTracks(), 'Neu auf Wavlake', ''), 'Neu');
+    await guard(async () => setItems(await wl.newTracks(), 'New on Wavlake', ''), 'New');
   }
 
   async function loadRandom(genre) {
     await guard(async () => {
       const tracks = await wl.randomTracks(genre && genre.id);
-      setItems(tracks, genre ? `Zufall · ${genre.name}` : 'Zufall', `${tracks.length} Tracks`);
-    }, 'Zufall');
+      setItems(tracks, genre ? `Random · ${genre.name}` : 'Random', `${tracks.length} tracks`);
+    }, 'Random');
   }
 
   async function runSearch() {
@@ -124,22 +124,22 @@ export function Browser({ onLoadDeck, onZap, capabilities }) {
     if (!term) return;
     await guard(async () => {
       const res = await wl.search(term);
-      setItems(res.tracks, `Suche: ${term}`, `${res.tracks.length} Tracks, ${res.artists.length} Artists, ${res.albums.length} Alben`);
+      setItems(res.tracks, `Search: ${term}`, `${res.tracks.length} tracks, ${res.artists.length} artists, ${res.albums.length} albums`);
       renderSearchSide(res);
-    }, 'Suche');
+    }, 'Search');
   }
 
   async function openArtist(a) {
     await guard(async () => {
       const tracks = await wl.artistTracks(a.id);
-      setItems(tracks, a.name, `${tracks.length} Tracks`);
+      setItems(tracks, a.name, `${tracks.length} tracks`);
     }, 'Artist');
   }
 
   async function openAlbum(al) {
     await guard(async () => {
       const tracks = await wl.albumTracks(al.id);
-      setItems(tracks, al.name, `${tracks.length} Tracks`);
+      setItems(tracks, al.name, `${tracks.length} tracks`);
     }, 'Album');
   }
 
@@ -149,11 +149,11 @@ export function Browser({ onLoadDeck, onZap, capabilities }) {
       const pls = await loadPlaylists(key || undefined);
       renderNostrSide(pls);
       if (!pls.length) {
-        setItems([], 'Nostr Playlists', capabilities.outbox || capabilities.relay
-          ? 'Keine Sets mit Wavlake-Tracks gefunden (kind 30003).'
-          : 'Kein Relay-Zugriff — dieser Host stellt weder outbox noch relay bereit.');
+        setItems([], 'Nostr playlists', capabilities.outbox || capabilities.relay
+          ? 'No sets with Wavlake tracks found (kind 30003).'
+          : 'No relay access — this host provides neither outbox nor relay.');
       } else {
-        setItems([], 'Nostr Playlists', `${pls.length} Sets gefunden — links auswählen`);
+        setItems([], 'Nostr playlists', `${pls.length} sets found — pick one on the left`);
       }
     }, 'Nostr');
   }
@@ -161,7 +161,7 @@ export function Browser({ onLoadDeck, onZap, capabilities }) {
   async function openPlaylist(pl) {
     await guard(async () => {
       const tracks = await resolvePlaylist(pl);
-      setItems(tracks, pl.title, `${tracks.length} von ${pl.trackIds.length} Einträgen aufgelöst`);
+      setItems(tracks, pl.title, `${tracks.length} of ${pl.trackIds.length} entries resolved`);
     }, 'Playlist');
   }
 
@@ -204,7 +204,7 @@ export function Browser({ onLoadDeck, onZap, capabilities }) {
 
   function showPlaylist() {
     const pl = playlistTracks();
-    setItems(pl, 'Playlist', `${pl.length} Tracks im Crate`);
+    setItems(pl, 'Playlist', `${pl.length} tracks in the crate`);
     renderList();
   }
 
@@ -217,7 +217,7 @@ export function Browser({ onLoadDeck, onZap, capabilities }) {
 
   function renderStatus() {
     clear(statusEl);
-    if (busy) statusEl.appendChild(h('div', { class: 'status busy' }, 'Lade…'));
+    if (busy) statusEl.appendChild(h('div', { class: 'status busy' }, 'Loading…'));
     else if (error) statusEl.appendChild(h('div', { class: 'status bad' }, error));
   }
 
@@ -244,13 +244,13 @@ export function Browser({ onLoadDeck, onZap, capabilities }) {
       h('div', { class: 'row-actions' },
         h('button', {
           class: 'btn btn-mini btn-addpl',
-          title: t.localFile ? 'Lokale Dateien bleiben außerhalb der Playlist' : 'Zur Playlist',
+          title: t.localFile ? 'Local files stay out of the playlist' : 'Add to playlist',
           disabled: Boolean(t.localFile),
           onclick: (e) => { e.stopPropagation(); addTracksToCrate([t]); },
         }, '+'),
         h('button', {
           class: 'btn btn-zap-mini',
-          title: t.localFile ? 'Lokale Datei — kein Zap-Ziel' : 'Zap an den Artist',
+          title: t.localFile ? 'Local file — no zap target' : 'Zap the artist',
           disabled: Boolean(t.localFile),
           onclick: (e) => { e.stopPropagation(); onZap(t); },
         }, '⚡'),
@@ -267,18 +267,18 @@ export function Browser({ onLoadDeck, onZap, capabilities }) {
       if (sub) headEl.appendChild(h('div', { class: 'browser-h2' }, sub));
       if (items.length && heading !== 'Playlist') {
         headEl.appendChild(h('button', {
-          class: 'btn btn-mini btn-addall', title: 'Alle gelisteten Tracks zur Playlist',
+          class: 'btn btn-mini btn-addall', title: 'Add every listed track to the playlist',
           onclick: async () => {
             const n = await addTracksToCrate(items);
-            sub = n ? `${n} zur Playlist hinzugefügt` : 'Alle schon in der Playlist';
+            sub = n ? `${n} added to playlist` : 'All already in the playlist';
             renderList();
           },
-        }, '+ alle → Playlist'));
+        }, '+ all → playlist'));
       }
     }
     clear(list);
     if (!items.length && !busy) {
-      list.appendChild(h('div', { class: 'empty' }, 'Nichts zu zeigen.'));
+      list.appendChild(h('div', { class: 'empty' }, 'Nothing to show.'));
       return;
     }
     const frag = document.createDocumentFragment();
@@ -298,11 +298,11 @@ export function Browser({ onLoadDeck, onZap, capabilities }) {
     clear(sideEl);
     if (tab === 'charts') {
       sideEl.appendChild(h('div', { class: 'side-group' },
-        h('div', { class: 'side-h' }, 'Listen'),
+        h('div', { class: 'side-h' }, 'Lists'),
         chip('Top 40', () => loadCharts(40)),
         chip('Top 100', () => loadCharts(100)),
-        chip('Neu', () => loadNew()),
-        chip('Zufall', () => loadRandom(null)),
+        chip('New', () => loadNew()),
+        chip('Random', () => loadRandom(null)),
       ));
       const g = h('div', { class: 'side-group' }, h('div', { class: 'side-h' }, 'Genres'));
       if (!genreList.length) {
@@ -314,39 +314,39 @@ export function Browser({ onLoadDeck, onZap, capabilities }) {
       sideEl.appendChild(g);
     } else if (tab === 'search') {
       sideEl.appendChild(h('div', { class: 'side-group' },
-        h('div', { class: 'side-h' }, 'Wavlake durchsuchen'),
+        h('div', { class: 'side-h' }, 'Search Wavlake'),
         searchInput,
-        h('button', { class: 'btn btn-primary', onclick: runSearch }, 'Suchen'),
+        h('button', { class: 'btn btn-primary', onclick: runSearch }, 'Search'),
       ));
       if (sideEl._searchExtra) sideEl.appendChild(sideEl._searchExtra);
     } else if (tab === 'crate') {
       const trackEntries = crate.filter((c) => c.type === 'track');
       const g = h('div', { class: 'side-group' }, h('div', { class: 'side-h' }, `Playlist (${trackEntries.length})`));
       if (!trackEntries.length) {
-        g.appendChild(h('div', { class: 'muted' }, 'Leer. In jeder Liste legt „+" einen Track hierher, „+ alle" die ganze Liste.'));
+        g.appendChild(h('div', { class: 'muted' }, 'Empty. In any list, "+" drops a track here, "+ all" the whole list.'));
       } else {
         for (const c of trackEntries) {
           g.appendChild(h('div', { class: 'crate-row' },
             chip(`♪ ${c.name}`, showPlaylist),
             h('button', {
-              class: 'btn btn-mini', title: 'Entfernen',
+              class: 'btn btn-mini', title: 'Remove',
               onclick: async () => { await removeFromCrate(c); if (heading === 'Playlist') showPlaylist(); },
             }, '×'),
           ));
         }
-        g.appendChild(h('button', { class: 'btn btn-ghost', onclick: showPlaylist }, 'Playlist anzeigen'));
+        g.appendChild(h('button', { class: 'btn btn-ghost', onclick: showPlaylist }, 'Show playlist'));
       }
       sideEl.appendChild(g);
 
       const sources = crate.filter((c) => c.type !== 'track');
-      const g2 = h('div', { class: 'side-group' }, h('div', { class: 'side-h' }, 'Quellen'));
+      const g2 = h('div', { class: 'side-group' }, h('div', { class: 'side-h' }, 'Sources'));
       if (!sources.length) {
-        g2.appendChild(h('div', { class: 'muted' }, 'Artists/Alben aus der Suche mit „+ Crate" merken.'));
+        g2.appendChild(h('div', { class: 'muted' }, 'Save artists/albums from search with "+ Crate".'));
       } else {
         for (const c of sources) {
           g2.appendChild(h('div', { class: 'crate-row' },
             chip(`${c.type === 'artist' ? '👤' : '💿'} ${c.name}`, () => (c.type === 'artist' ? openArtist(c) : openAlbum(c))),
-            h('button', { class: 'btn btn-mini', title: 'Entfernen', onclick: () => removeFromCrate(c) }, '×'),
+            h('button', { class: 'btn btn-mini', title: 'Remove', onclick: () => removeFromCrate(c) }, '×'),
           ));
         }
         g2.appendChild(h('button', {
@@ -357,17 +357,17 @@ export function Browser({ onLoadDeck, onZap, capabilities }) {
               const t = c.type === 'artist' ? await wl.artistTracks(c.id) : await wl.albumTracks(c.id);
               all.push(...t);
             }
-            setItems(all, 'Quellen gesamt', `${all.length} Tracks aus ${sources.length} Einträgen`);
+            setItems(all, 'All sources', `${all.length} tracks from ${sources.length} entries`);
           }, 'Crate'),
-        }, 'Alles laden'));
+        }, 'Load all'));
       }
       sideEl.appendChild(g2);
     } else if (tab === 'nostr') {
       sideEl.appendChild(h('div', { class: 'side-group' },
         h('div', { class: 'side-h' }, 'Playlists (kind 30003)'),
         npubInput,
-        h('button', { class: 'btn btn-primary', onclick: loadNostrPlaylists }, 'Laden'),
-        sideEl._nostrExtra || h('div', { class: 'muted' }, 'Sets mit Wavlake-Links werden aufgelöst.'),
+        h('button', { class: 'btn btn-primary', onclick: loadNostrPlaylists }, 'Load'),
+        sideEl._nostrExtra || h('div', { class: 'muted' }, 'Sets containing Wavlake links get resolved.'),
       ));
     }
   }
@@ -379,16 +379,16 @@ export function Browser({ onLoadDeck, onZap, capabilities }) {
       for (const a of res.artists.slice(0, 12)) {
         extra.appendChild(h('div', { class: 'crate-row' },
           chip(a.name, () => openArtist(a)),
-          h('button', { class: 'btn btn-mini', title: 'Zum Crate', onclick: () => addToCrate({ type: 'artist', id: a.id, name: a.name }) }, '+'),
+          h('button', { class: 'btn btn-mini', title: 'Save to crate', onclick: () => addToCrate({ type: 'artist', id: a.id, name: a.name }) }, '+'),
         ));
       }
     }
     if (res.albums.length) {
-      extra.appendChild(h('div', { class: 'side-h' }, 'Alben'));
+      extra.appendChild(h('div', { class: 'side-h' }, 'Albums'));
       for (const al of res.albums.slice(0, 12)) {
         extra.appendChild(h('div', { class: 'crate-row' },
           chip(al.name, () => openAlbum(al)),
-          h('button', { class: 'btn btn-mini', title: 'Zum Crate', onclick: () => addToCrate({ type: 'album', id: al.id, name: al.name }) }, '+'),
+          h('button', { class: 'btn btn-mini', title: 'Save to crate', onclick: () => addToCrate({ type: 'album', id: al.id, name: al.name }) }, '+'),
         ));
       }
     }

@@ -10,16 +10,16 @@ export function openZapDialog(track, settings) {
   let comment = '';
   let recipient = null;
 
-  const status = h('div', { class: 'zap-status' }, 'Suche Lightning-Adresse des Artists…');
+  const status = h('div', { class: 'zap-status' }, 'Looking up the artist\'s Lightning address…');
   const amountInput = h('input', {
     class: 'zap-amount', type: 'number', min: '1', step: '1', value: String(amount),
-    'aria-label': 'Betrag in Sats',
+    'aria-label': 'Amount in sats',
     oninput: (e) => { amount = Math.max(1, parseInt(e.target.value, 10) || 0); },
   });
   const commentInput = h('input', {
     class: 'zap-comment', type: 'text', maxLength: '250',
-    placeholder: 'Boost-Nachricht (optional)',
-    'aria-label': 'Nachricht',
+    placeholder: 'Boost message (optional)',
+    'aria-label': 'Message',
     oninput: (e) => { comment = e.target.value; },
   });
 
@@ -29,8 +29,8 @@ export function openZapDialog(track, settings) {
 
   const modeNote = h('div', { class: 'muted zap-mode' },
     settings.zapMode === 'nip57'
-      ? 'Modus NIP-57: der Zap-Request (kind 9734) wird vom Host signiert und dabei auch an deine Relays gesendet.'
-      : 'Modus LNURL-pay: keine Signatur, keine Nostr-Quittung. Die Nachricht geht als LNURL-Kommentar mit.',
+      ? 'NIP-57 mode: the zap request (kind 9734) is signed by the host and also published to your relays.'
+      : 'LNURL-pay mode: no signature, no Nostr receipt. The message rides along as the LNURL comment.',
   );
 
   const body = h('div', { class: 'zap-body' },
@@ -41,7 +41,7 @@ export function openZapDialog(track, settings) {
     status,
     h('label', { class: 'lbl' }, 'Sats'),
     h('div', { class: 'zap-amount-row' }, amountInput, presets),
-    h('label', { class: 'lbl' }, 'Nachricht'),
+    h('label', { class: 'lbl' }, 'Message'),
     commentInput,
     modeNote,
   );
@@ -50,8 +50,8 @@ export function openZapDialog(track, settings) {
     title: '⚡ Value4Value Zap',
     body,
     actions: [
-      { label: 'Abbrechen', onClick: (close) => close() },
-      { label: 'Zap senden', primary: true, onClick: () => send() },
+      { label: 'Cancel', onClick: (close) => close() },
+      { label: 'Send zap', primary: true, onClick: () => send() },
     ],
   });
 
@@ -59,23 +59,23 @@ export function openZapDialog(track, settings) {
     .then((rec) => {
       recipient = rec;
       if (!rec) {
-        status.textContent = 'Kein Nostr-Profil für diesen Artist gefunden.';
+        status.textContent = 'No Nostr profile found for this artist.';
         status.className = 'zap-status warn';
       } else if (!rec.lnurl) {
-        status.textContent = `${rec.name || track.artist}: keine Lightning-Adresse im Profil.`;
+        status.textContent = `${rec.name || track.artist}: no Lightning address in the profile.`;
         status.className = 'zap-status warn';
       } else {
-        status.textContent = `An ${rec.name || track.artist} · ${rec.address || 'LNURL'}`;
+        status.textContent = `To ${rec.name || track.artist} · ${rec.address || 'LNURL'}`;
         status.className = 'zap-status ok';
       }
     })
     .catch((e) => {
-      status.textContent = `Empfänger nicht auflösbar: ${e.message}`;
+      status.textContent = `Could not resolve recipient: ${e.message}`;
       status.className = 'zap-status warn';
     });
 
   async function send() {
-    status.textContent = 'Erzeuge Invoice…';
+    status.textContent = 'Creating invoice…';
     status.className = 'zap-status busy';
     try {
       const { invoice, mode } = await createInvoice(track, {
@@ -93,7 +93,7 @@ export function openZapDialog(track, settings) {
         status.appendChild(h('button', {
           class: 'btn btn-mini',
           onclick: () => openWavlakeBoost(track),
-        }, 'Auf Wavlake boosten'));
+        }, 'Boost on Wavlake'));
       }
     }
   }
@@ -101,29 +101,29 @@ export function openZapDialog(track, settings) {
   function showInvoice(invoice, mode) {
     const ta = h('textarea', { class: 'invoice', readonly: true, rows: '4', value: invoice });
     dlg.setBody(h('div', { class: 'zap-body' },
-      h('div', { class: 'zap-status ok' }, `Invoice über ${amount} sats erzeugt (${mode === 'nip57' ? 'NIP-57 Zap' : 'LNURL-pay'}).`),
+      h('div', { class: 'zap-status ok' }, `Invoice for ${amount} sats created (${mode === 'nip57' ? 'NIP-57 zap' : 'LNURL-pay'}).`),
       ta,
       h('div', { class: 'zap-invoice-actions' },
         h('button', {
           class: 'btn btn-primary',
           onclick: async () => {
             const res = await payInvoice(invoice);
-            if (res.ok) toast(res.method === 'webln' ? 'Bezahlt.' : 'Wallet geöffnet.', 'ok');
-            else toast('Zahlung nicht bestätigt.', 'warn');
+            if (res.ok) toast(res.method === 'webln' ? 'Paid.' : 'Wallet opened.', 'ok');
+            else toast('Payment not confirmed.', 'warn');
           },
-        }, 'Im Wallet öffnen'),
+        }, 'Open in wallet'),
         h('button', {
           class: 'btn btn-ghost',
           onclick: async () => {
             try {
               await navigator.clipboard.writeText(invoice);
-              toast('Invoice kopiert.', 'ok');
+              toast('Invoice copied.', 'ok');
             } catch {
               ta.select();
-              toast('Kopieren blockiert — Text ist markiert.', 'warn');
+              toast('Copy blocked — text is selected.', 'warn');
             }
           },
-        }, 'Kopieren'),
+        }, 'Copy'),
       ),
     ));
   }

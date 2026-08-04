@@ -180,7 +180,7 @@ const sync = await frame.evaluate(() => {
   return { tempoB: B.tempo, err, bpmA: A.effectiveBpm, bpmB: B.effectiveBpm };
 });
 check('sync matched the tempo', Math.abs(sync.bpmA - sync.bpmB) < 0.05, `${sync.bpmA.toFixed(2)} vs ${sync.bpmB.toFixed(2)}`);
-check('sync landed on the beat grid', sync.err < 0.06, `Phasenfehler ${(sync.err * 100).toFixed(1)} % eines Beats`);
+check('sync landed on the beat grid', sync.err < 0.06, `phase error ${(sync.err * 100).toFixed(1)} % of a beat`);
 
 /* ----------------------------- cue bus ----------------------------- */
 
@@ -246,7 +246,7 @@ const caught = await frame.evaluate(() => {
   if (err > 0.5) err = 1 - err;
   return err;
 });
-check('latch re-catches a perturbed deck', caught < 0.06, `Fehler ${(caught * 100).toFixed(1)} % eines Beats`);
+check('latch re-catches a perturbed deck', caught < 0.06, `error ${(caught * 100).toFixed(1)} % of a beat`);
 
 await frame.locator('.deck-B .btn-sync').click();
 await page.waitForTimeout(300);
@@ -306,7 +306,7 @@ check('downbeat (bar-1) detected', Number.isFinite(bars.barA) && Number.isFinite
   `barA=${bars.barA && bars.barA.toFixed(3)}s`);
 check('bar-1 sits on the beat grid', Number.isFinite(bars.barA)
   && Math.abs(((bars.barA - bars.beatA) / (60 / det.bpmA)) % 1) < 0.02,
-  `${((bars.barA - bars.beatA) / (60 / det.bpmA)).toFixed(2)} Beats über beatOffset`);
+  `${((bars.barA - bars.beatA) / (60 / det.bpmA)).toFixed(2)} beats above beatOffset`);
 
 // Deck B stopped, deck A playing — DROP must arm, then fire on A's next bar-1.
 await frame.evaluate(() => {
@@ -324,7 +324,7 @@ const armState = await frame.evaluate(() => {
   return { armed: Boolean(B._drop), playing: B.playing, mode: B._mode };
 });
 check('DROP arms on a stopped deck', armState.armed || (armState.playing && armState.mode === 'source'),
-  armState.armed ? 'scharf' : 'sofort gefeuert');
+  armState.armed ? 'armed' : 'fired instantly');
 
 await frame.waitForFunction(() => {
   const B = window.__djclanker.decks.B;
@@ -345,7 +345,7 @@ const dropped = await frame.evaluate(() => {
 check('DROP matched the tempo', Math.abs(dropped.bpmA - dropped.bpmB) < 0.05,
   `${dropped.bpmA.toFixed(2)} vs ${dropped.bpmB.toFixed(2)}`);
 check('DROP landed 1-on-1 (bar phase)', dropped.err < 0.03,
-  `Taktfehler ${(dropped.err * 100).toFixed(1)} % eines 4/4-Takts`);
+  `bar error ${(dropped.err * 100).toFixed(1)} % of a 4/4 bar`);
 await frame.evaluate(() => window.__djclanker.decks.B.pause());
 
 await page.screenshot({ path: `${OUT}-decks.png`, fullPage: true });

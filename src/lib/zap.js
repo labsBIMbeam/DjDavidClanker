@@ -68,7 +68,7 @@ export async function lnurlParams(lnurl) {
   if (!params || params.status === 'ERROR') {
     throw new Error((params && params.reason) || 'LNURL endpoint error');
   }
-  if (params.tag !== 'payRequest' || !params.callback) throw new Error('Kein gültiger LNURL-pay Endpoint');
+  if (params.tag !== 'payRequest' || !params.callback) throw new Error('Not a valid LNURL-pay endpoint');
   return params;
 }
 
@@ -85,7 +85,7 @@ export async function createInvoice(track, {
 } = {}) {
   const rec = recipient || (await resolveRecipient(track));
   if (!rec || !rec.lnurl) {
-    const err = new Error('Für diesen Artist ist keine Lightning-Adresse im Nostr-Profil hinterlegt.');
+    const err = new Error('This artist has no Lightning address in their Nostr profile.');
     err.code = 'NO_LNURL';
     throw err;
   }
@@ -132,7 +132,7 @@ export async function createInvoice(track, {
 
   const res = await fetchJson(url.toString());
   if (!res || res.status === 'ERROR' || !res.pr) {
-    throw new Error((res && res.reason) || 'Keine Invoice erhalten');
+    throw new Error((res && res.reason) || 'No invoice received');
   }
   return { invoice: res.pr, params, mode: usedMode, recipient: rec };
 }
@@ -151,7 +151,7 @@ export async function payInvoice(invoice) {
       if (/user reject|denied/i.test(e.message || '')) return { method: 'webln', ok: false };
     }
   }
-  const ok = await openLink(`lightning:${invoice}`, 'Zap bezahlen');
+  const ok = await openLink(`lightning:${invoice}`, 'Pay zap');
   return { method: 'link', ok };
 }
 

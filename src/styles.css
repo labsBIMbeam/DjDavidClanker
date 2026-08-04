@@ -18,12 +18,12 @@
   --line: var(--c-volcanic);
   --text: var(--c-ember-white);
   --muted: #a89f90;
-  --a: var(--c-orange);   /* Deck A: das Orange */
-  --b: var(--c-gold);     /* Deck B: Gold */
-  --zap: var(--c-ember);  /* Energie, V4V, aktive FX */
-  --bad: #d93000;         /* abgeleitet: Ember vertieft — Alarm/Rückwärtslauf */
+  --a: var(--c-orange);   /* deck A: the orange */
+  --b: var(--c-gold);     /* deck B: gold */
+  --zap: var(--c-ember);  /* energy, V4V, active FX */
+  --bad: #d93000;         /* derived: ember deepened — alarms, reverse playback */
   --ok: var(--c-orange-bright);
-  --radius: 8px; /* r-2 für Flächen; Controls sind r-0 (sharp) */
+  --radius: 8px; /* r-2 for surfaces; controls are r-0 (sharp) */
   --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --display: Impact, Haettenschweiler, "Arial Narrow Bold", "Franklin Gothic Medium", sans-serif;
 }

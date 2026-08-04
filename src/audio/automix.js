@@ -162,7 +162,7 @@ export class Automix {
     try {
       await deck.load(track);
       if (deck.status !== 'ready') {
-        this.lastError = deck.error || 'Track nicht ladbar';
+        this.lastError = deck.error || 'track failed to load';
         this.pending = null;
         // A dead track must not stall the mix — move on to the next one.
         this.onStatus('skip-error');
@@ -279,17 +279,17 @@ export class Automix {
 
   /** Human-readable state for the UI bar. */
   describe() {
-    if (!this.enabled) return { label: 'AUS', detail: '' };
-    if (this.busy) return { label: 'LADEN', detail: this.pending ? `${this.pending.artist} – ${this.pending.title}` : '' };
-    if (this.fade) return { label: 'ÜBERBLENDEN', detail: `${Math.max(0, this.fade.dur - this.fade.t).toFixed(0)} s` };
-    if (!this.liveId) return { label: 'BEREIT', detail: `${this.remainingInQueue} Tracks in der Liste` };
+    if (!this.enabled) return { label: 'OFF', detail: '' };
+    if (this.busy) return { label: 'LOADING', detail: this.pending ? `${this.pending.artist} – ${this.pending.title}` : '' };
+    if (this.fade) return { label: 'CROSSFADING', detail: `${Math.max(0, this.fade.dur - this.fade.t).toFixed(0)} s` };
+    if (!this.liveId) return { label: 'READY', detail: `${this.remainingInQueue} tracks queued` };
     const idle = this.idleDeck;
     const left = this.remaining;
-    const next = idle && idle.track ? `${idle.track.artist} – ${idle.track.title}` : 'nächster Track folgt';
+    const next = idle && idle.track ? `${idle.track.artist} – ${idle.track.title}` : 'next track pending';
     const untilFade = Math.max(0, left - this.fadeSeconds);
     return {
-      label: 'LÄUFT',
-      detail: `${next} · Übergang in ${untilFade > 3600 ? '—' : `${Math.round(untilFade)} s`}`,
+      label: 'LIVE',
+      detail: `${next} · transition in ${untilFade > 3600 ? '—' : `${Math.round(untilFade)} s`}`,
     };
   }
 }

@@ -24,7 +24,7 @@ const setlist = [];
 
 /* ------------------------------ shell ------------------------------ */
 
-const identityEl = h('span', { class: 'ident' }, 'nicht angemeldet');
+const identityEl = h('span', { class: 'ident' }, 'not signed in');
 const modeEl = h('span', { class: 'badge' }, inShell() ? 'NAPPLET' : 'STANDALONE');
 
 const header = h('header', { class: 'app-head' },
@@ -34,7 +34,7 @@ const header = h('header', { class: 'app-head' },
     h('span', { class: 'brand-sub' }, 'wavlake · v4v · two decks'),
   ),
   h('div', { class: 'head-right' }, modeEl, identityEl,
-    h('button', { class: 'btn btn-mini', title: 'Tastenkürzel & Info', onclick: showHelp }, '?'),
+    h('button', { class: 'btn btn-mini', title: 'Shortcuts & info', onclick: showHelp }, '?'),
   ),
 );
 
@@ -62,8 +62,8 @@ const automix = new Automix(mixer, {
   // When the queue runs dry, take whatever the browser is currently showing.
   refill: () => browser.currentItems(),
   onStatus: (s) => {
-    if (s === 'skip-error' && automix.lastError) toast(`Automix übersprungen: ${automix.lastError}`, 'warn');
-    if (s === 'empty') toast('Automix hat keine Tracks — erst eine Liste laden.', 'warn');
+    if (s === 'skip-error' && automix.lastError) toast(`Automix skipped: ${automix.lastError}`, 'warn');
+    if (s === 'empty') toast('Automix has no tracks — load a list first.', 'warn');
   },
 });
 
@@ -71,7 +71,7 @@ const automixBar = AutomixBar(automix, {
   onQueueFromBrowser: () => {
     const items = browser.currentItems();
     automix.setQueue(items);
-    toast(items.length ? `${items.length} Tracks in die Automix-Queue übernommen.` : 'Die Liste ist leer.', items.length ? 'ok' : 'warn');
+    toast(items.length ? `${items.length} tracks taken into the automix queue.` : 'The list is empty.', items.length ? 'ok' : 'warn');
   },
 });
 
@@ -110,31 +110,31 @@ for (const id of ['A', 'B']) {
       // frame loop until it is clicked off again.
       if (deck.syncedTo) {
         deck.setSynced(null);
-        toast(`SYNC Deck ${id} gelöst.`, 'ok');
+        toast(`SYNC deck ${id} released.`, 'ok');
         return;
       }
       const other = mixer.decks[id === 'A' ? 'B' : 'A'];
-      if (!other.effectiveBpm) return toast('Das andere Deck hat keine BPM.', 'warn');
+      if (!other.effectiveBpm) return toast('The other deck has no BPM.', 'warn');
       const target = other.effectiveBpm;
       const ok = deck.syncTo(other);
       const panel = id === 'A' ? panelA : panelB;
       panel.tempoFader.value = String(deck.tempo);
       if (ok) deck.setSynced(other);
       toast(ok
-        ? `Deck ${id} SYNC auf ${target.toFixed(1)} BPM — Phase wird gehalten.`
-        : `Nicht erreichbar im ±${deck.tempoRange}%-Bereich.`, ok ? 'ok' : 'warn');
+        ? `Deck ${id} synced to ${target.toFixed(1)} BPM — phase is being held.`
+        : `Out of reach within the ±${deck.tempoRange}% range.`, ok ? 'ok' : 'warn');
     }
     if (what === 'drop-request') {
       const other = mixer.decks[id === 'A' ? 'B' : 'A'];
       const r = deck.armDrop(other);
       const panel = id === 'A' ? panelA : panelB;
       panel.tempoFader.value = String(deck.tempo);
-      if (r === 'cancelled') toast(`Drop Deck ${id} abgebrochen.`, 'ok');
-      else if (r) toast(`Deck ${id} droppt auf der nächsten 1 von Deck ${id === 'A' ? 'B' : 'A'}.`, 'ok');
-      else toast('Drop braucht ein laufendes anderes Deck mit BPM und ein geladenes eigenes.', 'warn');
+      if (r === 'cancelled') toast(`Drop on deck ${id} cancelled.`, 'ok');
+      else if (r) toast(`Deck ${id} drops on deck ${id === 'A' ? 'B' : 'A'}'s next bar-1.`, 'ok');
+      else toast('Drop needs the other deck playing with a BPM and this one loaded.', 'warn');
     }
     if (what === 'ended') {
-      toast(`Deck ${id} ist durch.`, 'warn');
+      toast(`Deck ${id} ran out.`, 'warn');
     }
   });
 }
@@ -142,7 +142,7 @@ for (const id of ['A', 'B']) {
 async function loadIntoDeck(id, track) {
   const deck = mixer.decks[id];
   mixer.ensureContext();
-  toast(`Lade "${track.title}" in Deck ${id}…`);
+  toast(`Loading "${track.title}" into deck ${id}…`);
   await deck.load(track);
   if (deck.status === 'ready') {
     recordPlay(track);
@@ -166,7 +166,7 @@ function eject(deck) {
 
 function zapDeck(deck) {
   if (!deck.track) return;
-  if (deck.track.localFile) return toast('Lokale Datei — kein Zap-Ziel.', 'warn');
+  if (deck.track.localFile) return toast('Local file — no zap target.', 'warn');
   openZapDialog(deck.track, settings);
 }
 
@@ -179,30 +179,30 @@ function recordPlay(track) {
 /* ------------------------------ setlist ------------------------------ */
 
 async function publishCurrentSet() {
-  if (!setlist.length) return toast('Noch nichts gespielt.', 'warn');
+  if (!setlist.length) return toast('Nothing played yet.', 'warn');
   if (!caps.outbox && !caps.relay && !window.nostr) {
-    return toast('Kein Publish-Kanal verfügbar (weder outbox/relay noch NIP-07).', 'bad', 6000);
+    return toast('No publish channel available (neither outbox/relay nor NIP-07).', 'bad', 6000);
   }
-  const titleInput = h('input', { class: 'search-input', value: `DJ David Clanker Set`, 'aria-label': 'Titel' });
-  const descInput = h('input', { class: 'search-input', placeholder: 'Beschreibung (optional)', 'aria-label': 'Beschreibung' });
+  const titleInput = h('input', { class: 'search-input', value: `DJ David Clanker Set`, 'aria-label': 'Title' });
+  const descInput = h('input', { class: 'search-input', placeholder: 'Description (optional)', 'aria-label': 'Description' });
   openModal({
-    title: '📡 Setlist veröffentlichen',
+    title: '📡 Publish setlist',
     body: h('div', { class: 'settings' },
-      h('div', { class: 'muted' }, `${setlist.length} Tracks werden als kind-30003-Set mit r-Tags publiziert.`),
-      h('label', { class: 'lbl' }, 'Titel'), titleInput,
-      h('label', { class: 'lbl' }, 'Beschreibung'), descInput,
+      h('div', { class: 'muted' }, `${setlist.length} tracks get published as a kind-30003 set with r tags.`),
+      h('label', { class: 'lbl' }, 'Title'), titleInput,
+      h('label', { class: 'lbl' }, 'Description'), descInput,
       h('ol', { class: 'setlist-preview' }, ...setlist.map((t) => h('li', {}, `${t.artist} – ${t.title}`))),
     ),
     actions: [
-      { label: 'Abbrechen', onClick: (close) => close() },
+      { label: 'Cancel', onClick: (close) => close() },
       {
-        label: 'Veröffentlichen', primary: true, onClick: async (close) => {
+        label: 'Publish', primary: true, onClick: async (close) => {
           try {
             const res = await publishSetlist(setlist, { title: titleInput.value, description: descInput.value });
             close();
-            toast(`Set veröffentlicht${res.eventId ? ` (${res.eventId.slice(0, 12)}…)` : ''}.`, 'ok');
+            toast(`Set published${res.eventId ? ` (${res.eventId.slice(0, 12)}…)` : ''}.`, 'ok');
           } catch (e) {
-            toast(`Fehlgeschlagen: ${e.message}`, 'bad', 7000);
+            toast(`Failed: ${e.message}`, 'bad', 7000);
           }
         },
       },
@@ -218,22 +218,22 @@ async function publishCurrentSet() {
  */
 function showOutputMenu() {
   mixer.ensureContext();
-  const outMaster = h('select', { class: 'search-input', 'aria-label': 'Master-Ausgang' });
-  const outCue = h('select', { class: 'search-input', 'aria-label': 'Vorhör-Ausgang' });
+  const outMaster = h('select', { class: 'search-input', 'aria-label': 'Master output' });
+  const outCue = h('select', { class: 'search-input', 'aria-label': 'Cue output' });
   const status = h('div', { class: 'muted' }, '');
 
   const fill = async () => {
     const outs = await mixer.listOutputs();
     for (const sel of [outMaster, outCue]) {
-      clear(sel).appendChild(h('option', { value: '' }, 'Systemstandard'));
+      clear(sel).appendChild(h('option', { value: '' }, 'System default'));
       for (const o of outs) sel.appendChild(h('option', { value: o.deviceId }, o.label));
     }
     outMaster.value = mixer.outputs.master || settings.outputMaster || '';
     outCue.value = mixer.outputs.cue || settings.outputCue || '';
-    const unlabeled = outs.length && outs.every((o) => /^Ausgang \d+$/.test(o.label));
+    const unlabeled = outs.length && outs.every((o) => /^Output \d+$/.test(o.label));
     status.textContent = !outs.length
-      ? 'Keine Geräte sichtbar — dieser Browser/Host gibt die Liste nicht frei.'
-      : unlabeled ? 'Gerätenamen verbirgt der Browser bis zur Freigabe (Button unten).' : '';
+      ? 'No devices visible — this browser/host does not expose the list.'
+      : unlabeled ? 'The browser hides device names until you grant access (button below).' : '';
   };
 
   const apply = (which, sel) => async () => {
@@ -241,8 +241,8 @@ function showOutputMenu() {
     settings[which === 'cue' ? 'outputCue' : 'outputMaster'] = sel.value;
     await store.setJson(SETTINGS_KEY, settings);
     toast(ok
-      ? `${which === 'cue' ? 'Kopfhörer' : 'Master'} umgeschaltet.`
-      : 'Gerätewahl nicht möglich (setSinkId fehlt oder verweigert).', ok ? 'ok' : 'warn');
+      ? `${which === 'cue' ? 'Headphones' : 'Master'} switched.`
+      : 'Device selection not possible (setSinkId missing or denied).', ok ? 'ok' : 'warn');
   };
   outMaster.addEventListener('change', apply('master', outMaster));
   outCue.addEventListener('change', apply('cue', outCue));
@@ -254,24 +254,24 @@ function showOutputMenu() {
         const s = await navigator.mediaDevices.getUserMedia({ audio: true });
         s.getTracks().forEach((t) => t.stop());
         await fill();
-        toast('Gerätenamen sichtbar.', 'ok');
+        toast('Device names revealed.', 'ok');
       } catch {
-        toast('Keine Freigabe — Namen bleiben verborgen.', 'warn');
+        toast('No permission — names stay hidden.', 'warn');
       }
     },
-  }, 'Gerätenamen freischalten');
+  }, 'Reveal device names');
 
   fill();
   openModal({
-    title: '🔈 Sound-Ausgänge',
+    title: '🔈 Audio outputs',
     body: h('div', { class: 'settings' },
-      h('label', { class: 'lbl' }, 'Master (Anlage)'), outMaster,
-      h('label', { class: 'lbl' }, 'Vorhören 🎧 (Kopfhörer)'), outCue,
+      h('label', { class: 'lbl' }, 'Master (PA)'), outMaster,
+      h('label', { class: 'lbl' }, 'Cue 🎧 (headphones)'), outCue,
       status,
       btnUnlock,
-      h('div', { class: 'muted' }, 'Getrennte Ausgänge brauchen AudioContext.setSinkId (Chrome ≥ 110). In einer Napplet-Shell muss der Host die speaker-selection-Policy durchreichen; ohne Wahl landet der Cue-Bus auf dem Standardausgang.'),
+      h('div', { class: 'muted' }, 'Separate outputs need AudioContext.setSinkId (Chrome ≥ 110). Inside a napplet shell the host has to pass the speaker-selection policy through; without a selection the cue bus lands on the default output.'),
     ),
-    actions: [{ label: 'Fertig', primary: true, onClick: (close) => close() }],
+    actions: [{ label: 'Done', primary: true, onClick: (close) => close() }],
   });
 }
 
@@ -280,8 +280,8 @@ function showOutputMenu() {
 function showSettings() {
   const zapAmount = h('input', { class: 'search-input', type: 'number', min: '1', value: String(settings.zapDefault) });
   const zapMode = h('select', { class: 'search-input' },
-    h('option', { value: 'lnurl', selected: settings.zapMode === 'lnurl' }, 'LNURL-pay (nichts wird signiert)'),
-    h('option', { value: 'nip57', selected: settings.zapMode === 'nip57' }, 'NIP-57 (Host signiert & publiziert kind 9734)'),
+    h('option', { value: 'lnurl', selected: settings.zapMode === 'lnurl' }, 'LNURL-pay (nothing gets signed)'),
+    h('option', { value: 'nip57', selected: settings.zapMode === 'nip57' }, 'NIP-57 (host signs & publishes kind 9734)'),
   );
   const proxy = h('input', {
     class: 'search-input', value: settings.proxy,
@@ -289,31 +289,31 @@ function showSettings() {
   });
 
   openModal({
-    title: '⚙ Einstellungen',
+    title: '⚙ Settings',
     body: h('div', { class: 'settings' },
-      h('label', { class: 'lbl' }, 'Standard-Zap (sats)'), zapAmount,
-      h('label', { class: 'lbl' }, 'Zap-Modus'), zapMode,
-      h('div', { class: 'muted' }, 'NIP-5D kennt keine Payment-Domain und keine reine Signier-API. Ein echter NIP-57-Zap ist nur möglich, indem der Host den 9734-Request beim Publizieren signiert — er landet dann auch auf deinen Relays.'),
-      h('label', { class: 'lbl' }, 'Audio-Ausgänge'),
-      h('button', { class: 'btn btn-ghost', onclick: () => showOutputMenu() }, '🔈 Sound-Ausgänge öffnen'),
-      h('label', { class: 'lbl' }, 'CORS-Proxy (nur Standalone)'), proxy,
-      h('div', { class: 'muted' }, 'Wavlakes Audio-CDN sendet keine CORS-Header. Im Napplet holt der Host die Bytes über resource.bytes, standalone braucht es dafür einen Proxy — sonst läuft nur der Basic-Modus.'),
-      h('div', { class: 'caps' }, h('div', { class: 'side-h' }, 'Host-Domains'),
+      h('label', { class: 'lbl' }, 'Default zap (sats)'), zapAmount,
+      h('label', { class: 'lbl' }, 'Zap mode'), zapMode,
+      h('div', { class: 'muted' }, 'NIP-5D has no payment domain and no pure signing API. A real NIP-57 zap only works by letting the host sign the 9734 request while publishing it — so it also lands on your relays.'),
+      h('label', { class: 'lbl' }, 'Audio outputs'),
+      h('button', { class: 'btn btn-ghost', onclick: () => showOutputMenu() }, '🔈 Open audio outputs'),
+      h('label', { class: 'lbl' }, 'CORS proxy (standalone only)'), proxy,
+      h('div', { class: 'muted' }, 'Wavlake\'s audio CDN sends no CORS headers. Inside the napplet the host fetches the bytes via resource.bytes; standalone needs a proxy for that — otherwise only basic mode runs.'),
+      h('div', { class: 'caps' }, h('div', { class: 'side-h' }, 'Host domains'),
         ...Object.entries(caps).filter(([k]) => k !== 'shell').map(([k, v]) =>
           h('span', { class: `cap ${v ? 'on' : 'off'}` }, `${v ? '✓' : '×'} ${k}`)),
       ),
     ),
     actions: [
-      { label: 'Schließen', onClick: (close) => close() },
+      { label: 'Close', onClick: (close) => close() },
       {
-        label: 'Speichern', primary: true, onClick: async (close) => {
+        label: 'Save', primary: true, onClick: async (close) => {
           settings.zapDefault = Math.max(1, parseInt(zapAmount.value, 10) || 210);
           settings.zapMode = zapMode.value;
           settings.proxy = proxy.value.trim();
           mixer.proxy = settings.proxy;
           await store.setJson(SETTINGS_KEY, settings);
           close();
-          toast('Gespeichert.', 'ok');
+          toast('Saved.', 'ok');
         },
       },
     ],
@@ -322,38 +322,38 @@ function showSettings() {
 
 function showHelp() {
   const keys = [
-    ['Q / P', 'Deck A / B Play-Pause'],
-    ['W / O', 'Deck A / B Cue'],
-    ['X', 'Automix an / aus'],
-    ['N', 'Automix: jetzt überblenden'],
-    ['S / L', 'Deck A / B Rewind — halten, wird schneller'],
-    ['V / B', 'Deck A / B zwischen VINYL und CDJ umschalten'],
-    ['E / I', 'Deck A / B Vorhören (🎧 Cue-Bus)'],
-    ['F / G', 'Deck A FX-Slot 1 / 2'],
-    ['H / J', 'Deck B FX-Slot 1 / 2'],
-    [', / .', 'Crossfader nach links / rechts'],
-    ['M', 'Crossfader mittig'],
-    ['1 / 2', 'Deck A / B SYNC-Latch (BPM + Phase halten)'],
-    ['3 / 4', 'Deck A / B DROP: auf der nächsten Takt-1 des anderen Decks starten'],
-    ['← / →', 'Deck A um 5 s spulen (mit Alt: Deck B)'],
-    ['Doppelklick', 'Track in Deck A laden'],
+    ['Q / P', 'Deck A / B play-pause'],
+    ['W / O', 'Deck A / B cue'],
+    ['X', 'Automix on / off'],
+    ['N', 'Automix: crossfade now'],
+    ['S / L', 'Deck A / B rewind — hold to speed up'],
+    ['V / B', 'Deck A / B toggle VINYL vs CDJ'],
+    ['E / I', 'Deck A / B pre-listen (🎧 cue bus)'],
+    ['F / G', 'Deck A FX slot 1 / 2'],
+    ['H / J', 'Deck B FX slot 1 / 2'],
+    [', / .', 'Crossfader left / right'],
+    ['M', 'Center the crossfader'],
+    ['1 / 2', 'Deck A / B SYNC latch (hold BPM + phase)'],
+    ['3 / 4', 'Deck A / B DROP: start on the other deck\'s next bar-1'],
+    ['← / →', 'Seek deck A by 5 s (with Alt: deck B)'],
+    ['Double-click', 'Load a track into deck A'],
   ];
   openModal({
     title: 'DJ David Clanker',
     body: h('div', { class: 'settings' },
-      h('div', { class: 'muted' }, 'Zwei-Deck-Mixer für Wavlake-Musik, gebaut als NIP-5D-Napplet. Musik kommt aus den Wavlake-Charts, der Katalogsuche, deinem Crate und kind-30003-Playlists von Nostr. Jeder Track hat einen Value4Value-Zap-Button.'),
+      h('div', { class: 'muted' }, 'Two-deck mixer for Wavlake music, built as a NIP-5D napplet. Music comes from the Wavlake charts, catalog search, your crate, kind-30003 playlists from Nostr, and local files. Every track has a value4value zap button.'),
       h('div', { class: 'side-h' }, 'Vinyl'),
-      h('div', { class: 'muted' }, 'Im VINYL-Modus ist der Teller ein Plattenteller: ziehen scratcht das Audio vorwärts und rückwärts, Stop bremst hörbar aus, Start läuft hoch. CDJ-Modus startet sofort, der Teller macht dann nur Pitchbend. Rewind wird umso schneller, je länger du hältst — kurz antippen gibt einen Stotterer, lange halten einen kompletten Backspin.'),
+      h('div', { class: 'muted' }, 'In VINYL mode the platter is a turntable: dragging scratches the audio forwards and backwards, stop brakes audibly, start spins up. CDJ mode starts instantly and the platter only pitchbends. Rewind accelerates the longer you hold — a tap gives a stutter, holding gives a full backspin.'),
       h('div', { class: 'side-h' }, 'Automix'),
-      h('div', { class: 'muted' }, 'Übernimmt die Liste aus dem Browser, lädt den nächsten Track rechtzeitig aufs freie Deck, zieht ihn auf die BPM und blendet im Outro über. Du kannst jederzeit dazwischenfahren — Automix nutzt dieselben Bedienelemente wie du.'),
+      h('div', { class: 'muted' }, 'Takes the list from the browser, loads the next track onto the free deck in time, pulls it onto the BPM and crossfades in the outro. You can grab the controls at any moment — automix drives the same controls you do.'),
       h('div', { class: 'side-h' }, 'FX'),
-      h('div', { class: 'muted' }, 'Fünf Insert-Effekte pro Deck — Flanger, Phaser, Gater, Echo, Reverb — hinter dem Filter. Zwei Slots wählen per Dropdown, welche beiden die FX-Buttons (und F/G bzw. H/J) schalten. Gater und Echo laufen tempo-synchron auf der BPM des Decks.'),
-      h('div', { class: 'side-h' }, 'Tasten'),
+      h('div', { class: 'muted' }, 'Five insert effects per deck — flanger, phaser, gater, echo, reverb — behind the filter. Two slots choose via dropdown which pair the FX buttons (and F/G or H/J) drive. Gater and echo run tempo-synced on the deck\'s BPM.'),
+      h('div', { class: 'side-h' }, 'Keys'),
       h('table', { class: 'keys' }, ...keys.map(([k, d]) => h('tr', {}, h('td', {}, k), h('td', {}, d)))),
-      h('div', { class: 'side-h' }, 'Modi'),
-      h('div', { class: 'muted' }, 'FULL = Samples liegen dekodiert vor: EQ, Filter, FX, Scratch, Waveform, BPM-Erkennung. BASIC = nur <audio>-Streaming: Crossfade über Lautstärke und Tempo über playbackRate — kein EQ, kein FX, kein Scratch.'),
+      h('div', { class: 'side-h' }, 'Modes'),
+      h('div', { class: 'muted' }, 'FULL = samples are decoded: EQ, filter, FX, scratch, waveform, BPM detection. BASIC = <audio> streaming only: crossfade via volume and tempo via playbackRate — no EQ, no FX, no scratch.'),
     ),
-    actions: [{ label: 'Alles klar', primary: true, onClick: (close) => close() }],
+    actions: [{ label: 'Got it', primary: true, onClick: (close) => close() }],
   });
 }
 
@@ -363,13 +363,13 @@ function updateCapBanner() {
   clear(capBanner);
   const msgs = [];
   if (!inShell()) {
-    msgs.push('Standalone-Modus: kein NIP-5D-Host. Zaps laufen über WebLN bzw. externe Wallet, Nostr-Publishing über eine NIP-07-Extension.');
+    msgs.push('Standalone mode: no NIP-5D host. Zaps go through WebLN or an external wallet, Nostr publishing through a NIP-07 extension.');
   }
   if (!caps.resource && !inShell()) {
-    msgs.push('Ohne Host-resource-Domain und ohne CORS-Proxy bleibt Audio im BASIC-Modus (kein EQ/Filter/Waveform).');
+    msgs.push('Without the host resource domain and without a CORS proxy, audio stays in BASIC mode (no EQ/filter/waveform).');
   }
   if (inShell() && !caps.resource) {
-    msgs.push('Dieser Host stellt die resource-Domain nicht bereit — im Sandbox-Iframe ist damit kein Audio erreichbar.');
+    msgs.push('This host does not provide the resource domain — inside the sandboxed iframe no audio is reachable.');
   }
   if (!msgs.length) {
     capBanner.style.display = 'none';
@@ -498,7 +498,7 @@ requestAnimationFrame(frame);
   const pk = await getPublicKey();
   const showKey = (hex) => {
     const npub = hex ? hexToNpub(hex) : '';
-    identityEl.textContent = npub ? `${npub.slice(0, 12)}…${npub.slice(-4)}` : 'nicht angemeldet';
+    identityEl.textContent = npub ? `${npub.slice(0, 12)}…${npub.slice(-4)}` : 'not signed in';
     identityEl.title = npub || '';
   };
   showKey(pk);
