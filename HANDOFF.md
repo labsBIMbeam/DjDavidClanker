@@ -215,9 +215,13 @@ disguised a real failure as a timeout.
   stays editable for when the choice is wrong.
 - **The cue output was never verified with real second hardware.** The bus,
   the MediaStream bridge and `setSinkId` are E2E-checked, but not with a
-  real second interface. In the napplet sandbox, device selection needs the
-  `speaker-selection` permission from the host; without it, cue lands on the
-  default output.
+  real second interface. **Shell requirement:** the host iframe must carry
+  `allow="speaker-selection *; microphone *"` (the `*` form — a sandboxed
+  srcdoc frame has an opaque origin). The dev shell does this since Aug 2026;
+  without the `microphone` delegation, "Reveal device names" cannot get
+  labels and the output menu shows anonymous entries. Note Chromium does not
+  recognize `speaker-selection` as a policy name (`allowsFeature` says no) —
+  `setSinkId` works there regardless; the mic policy is the load-bearing one.
 - **The reversed buffer doubles the memory**: roughly 60 MB per deck for a
   6-minute stereo track.
 - **Whole file before playback**, because `resource.bytes` returns a single
@@ -263,6 +267,18 @@ napplet init --name dj-david-clanker --relay wss://… --server https://…
 napplet deploy --dry-run
 napplet deploy
 ```
+
+**Live DJ** — `node dev/live-dj.mjs` puts an LLM behind the decks: the napplet
+has no network, so the brain runs outside and drives the same
+`window.__djclanker` handle the E2E suites use. Claude (Opus 5, JSON-schema
+decisions, server-side fallbacks) curates the browser list, drops MC lines as
+toasts and occasionally rides an effect; automix/SYNC/DROP keep the mechanics
+deterministic. Headed by default so audio plays locally; `HEADLESS=1`,
+`CYCLE_MS`, `MAX_CYCLES` for CI. Credentials resolve like any Anthropic SDK
+app (`ANTHROPIC_API_KEY` or an `ant auth login` profile); without them it
+falls back to a heuristic mode — same mixing, canned MC lines. The LLM request
+path follows the current SDK docs but has not yet run against the live API
+from this repo (no credentials in the dev environment).
 
 Playwright is installed globally in this environment. If `node dev/smoke.mjs`
 can't find the package:

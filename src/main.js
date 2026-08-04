@@ -468,8 +468,9 @@ if (media) {
 }
 
 // Debug handle: the napplet is alone in its sandbox, and having the live mixer
-// reachable makes the platter/FX behaviour testable from the outside.
-window.__djclanker = { mixer, decks: mixer.decks, settings, automix, browser };
+// reachable makes the platter/FX behaviour testable from the outside — and
+// drivable: dev/live-dj.mjs runs a whole set through this handle.
+window.__djclanker = { mixer, decks: mixer.decks, settings, automix, browser, toast };
 
 /* ------------------------------ loop ------------------------------ */
 

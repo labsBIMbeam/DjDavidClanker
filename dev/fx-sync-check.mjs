@@ -205,6 +205,21 @@ const pflOn = await frame.locator('.deck-A .btn-pfl').evaluate((el) => el.classL
 check('🎧 button reflects cue state', pflOn === true);
 await frame.evaluate(() => window.__djclanker.decks.A.setCue(false));
 
+// Output-device policy: the shell must delegate device permissions into the
+// sandboxed frame (microphone gates "Reveal device names"; speaker-selection
+// where the browser knows it), and setSinkId must actually resolve there.
+const policy = await frame.evaluate(async () => {
+  const fp = document.featurePolicy || document.permissionsPolicy;
+  const known = fp && fp.features ? fp.features() : [];
+  const feature = (name) => (known.includes(name) ? fp.allowsFeature(name) : 'n/a');
+  const ok = await window.__djclanker.mixer.setOutputDevice('cue', '');
+  return { mic: feature('microphone'), spk: feature('speaker-selection'), ok };
+});
+check('device policies reach the napplet',
+  (policy.mic === true || policy.mic === 'n/a') && policy.spk !== false,
+  `microphone=${policy.mic} speaker-selection=${policy.spk}`);
+check('setSinkId resolves inside the sandbox', policy.ok === true);
+
 /* --------------------------- SYNC latch --------------------------- */
 
 // Cross-metrical tempo match: detector levels 92.5 vs 138.75 must sync to ~0 %.
