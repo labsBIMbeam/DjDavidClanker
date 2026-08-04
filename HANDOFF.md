@@ -352,6 +352,8 @@ Interactions with non-obvious behavior:
 | Scope label | click cycles MIRROR → WAVE → BARS |
 | Waveform | click jumps (within the visible window), mouse wheel or −/+ zooms ×1–×64, the ×1 label resets. Zoomed, the window follows the playhead and renders live from 8k peaks; bar-1 lines are stronger and anchored to the detected downbeat. Double-click on a track row loads into Deck A |
 | DROP (keys 3/4) | starts the deck sample-accurately on the other deck's next bar-1 — tempo synced beforehand, own entry point = cue snapped to its own 1, CDJ start without vinyl spin-up. Pressing again aborts |
+| TAP (keys T/U) | tap tempo: hit it on every beat. Uses playback-position deltas (median), so it yields the BASE bpm regardless of the tempo fader; from the 4th tap BPM + beat grid are set and marked manual. Taps give the beat, not the 1 — `barOffset` re-anchors to the tapped grid |
+| Auto-scratch (BABY/SCRB/CHRP/TRNS/BSPN) | scripted turntablism over the granular platter, beat-synced, driven from `tickAudio`: baby, scribble, chirp, transformer, backspin. Runs ~2 bars (backspin 1) then hands back to normal playback; chirp/transformer gate the deck channel, not the crossfader |
 | "+" on a track row / "+ all → playlist" above the list | adds the track(s) to the playlist (Crate tab). There: a menu of all entries, × removes, "Show playlist" renders it as a loadable list |
 
 ---

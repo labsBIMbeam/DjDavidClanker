@@ -363,6 +363,63 @@ check('DROP landed 1-on-1 (bar phase)', dropped.err < 0.03,
   `bar error ${(dropped.err * 100).toFixed(1)} % of a 4/4 bar`);
 await frame.evaluate(() => window.__djclanker.decks.B.pause());
 
+/* ---------------------------- tap tempo ---------------------------- */
+
+const savedGrid = await frame.evaluate(() => {
+  const A = window.__djclanker.decks.A;
+  if (!A.playing) A.play();
+  return { bpm: A.bpm, beatOffset: A.beatOffset, barOffset: A.barOffset };
+});
+await page.waitForTimeout(600);
+for (let i = 0; i < 6; i++) {
+  await frame.evaluate(() => window.__djclanker.decks.A.tapBeat());
+  await page.waitForTimeout(500);
+}
+const tapped = await frame.evaluate(() => {
+  const A = window.__djclanker.decks.A;
+  return { bpm: A.bpm, manual: A.bpmManual, off: A.beatOffset };
+});
+check('tap tempo sets BPM from the taps', Math.abs(tapped.bpm - 120) < 8, `${tapped.bpm} BPM from ~500 ms taps`);
+check('tapped BPM is marked manual', tapped.manual === true);
+check('taps anchor the beat grid', Number.isFinite(tapped.off), `beatOffset=${tapped.off && tapped.off.toFixed(3)}s`);
+await frame.evaluate((g) => {
+  const A = window.__djclanker.decks.A;
+  A.bpm = g.bpm;
+  A.beatOffset = g.beatOffset;
+  A.barOffset = g.barOffset;
+  A.bpmManual = false;
+  A._taps = [];
+  A.emit('bpm');
+}, savedGrid);
+
+/* ---------------------------- auto-scratch ---------------------------- */
+
+const asStart = await frame.evaluate(() => {
+  const A = window.__djclanker.decks.A;
+  const posBefore = A.position;
+  const ok = A.startAutoScratch('baby');
+  return { ok, posBefore };
+});
+await page.waitForTimeout(400);
+const asMid = await frame.evaluate(() => {
+  const A = window.__djclanker.decks.A;
+  return { pattern: A.autoScratch, mode: A._mode, scratching: A.scratching };
+});
+check('auto-scratch engages the platter', asStart.ok && asMid.pattern === 'baby'
+  && asMid.mode === 'platter' && asMid.scratching, `pattern=${asMid.pattern} mode=${asMid.mode}`);
+
+// Two bars at the current tempo, then it must hand back to normal playback.
+const barMs = await frame.evaluate(() => (60 / window.__djclanker.decks.A.effectiveBpm) * 4 * 1000);
+await page.waitForTimeout(Math.ceil(barMs * 2 + 900));
+const asEnd = await frame.evaluate(() => {
+  const A = window.__djclanker.decks.A;
+  return { pattern: A.autoScratch, mode: A._mode, playing: A.playing, pos: A.position };
+});
+check('auto-scratch auto-stops after its bars', asEnd.pattern === null && asEnd.mode === 'source' && asEnd.playing,
+  `mode=${asEnd.mode}`);
+check('baby scratch stays near its spot', Math.abs(asEnd.pos - asStart.posBefore) < 4,
+  `drift ${(asEnd.pos - asStart.posBefore).toFixed(2)}s`);
+
 await page.screenshot({ path: `${OUT}-decks.png`, fullPage: true });
 await browser.close();
 
