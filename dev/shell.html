@@ -188,10 +188,23 @@
           : boot + napplet;
 
         const frame = document.getElementById('frame');
+
+        // Picking a specific output device needs a real origin: a sandboxed
+        // frame has an opaque origin ("null") and Chrome refuses media-device
+        // permission to it outright (SecurityError: Invalid security origin),
+        // so enumerateDevices never reveals an id to hand to setSinkId.
+        // `?devices=1` relaxes the sandbox for local two-output DJing. The
+        // default stays faithful to a real NIP-5D host — that is the
+        // constraint the E2E suites have to keep testing against.
+        if (new URLSearchParams(location.search).has('devices')) {
+          frame.setAttribute('sandbox', 'allow-scripts allow-same-origin');
+          log('DEVICE MODE — sandbox relaxed to allow-same-origin; output device selection enabled');
+        }
+
         frame.srcdoc = srcdoc;
         frame.addEventListener('load', () => {
           frameWin = frame.contentWindow;
-          log('napplet geladen,', String(srcdoc.length), 'bytes srcdoc');
+          log('napplet loaded,', String(srcdoc.length), 'bytes srcdoc');
         });
       })();
     </script>
