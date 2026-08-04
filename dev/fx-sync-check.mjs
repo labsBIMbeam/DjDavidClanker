@@ -310,13 +310,18 @@ const escaped = await frame.evaluate(() => {
 check('EXIT leaves the loop', !escaped.active && escaped.pos > loop4.end,
   `pos=${escaped.pos.toFixed(2)}s > ${loop4.end.toFixed(2)}s`);
 
+// Assert the loop against the playhead positions the two clicks actually saw,
+// not against wall-clock: the gap between two Playwright clicks includes
+// actionability and scroll overhead, so a fixed upper bound turns any DOM
+// growth into a false failure.
 await frame.locator('.deck-A .btn-loopin').click();
+const posIn = await frame.evaluate(() => window.__djclanker.decks.A.position);
 await page.waitForTimeout(900);
 await frame.locator('.deck-A .btn-loopout').click();
-await page.waitForTimeout(150);
 const manual = await frame.evaluate(() => window.__djclanker.decks.A.loop);
-check('manual IN/OUT loop closes', manual.active && manual.end - manual.start > 0.5 && manual.end - manual.start < 1.6,
-  `${(manual.end - manual.start).toFixed(2)}s`);
+const span = manual.end - manual.start;
+check('manual IN/OUT loop closes on the in-point', manual.active && span > 0.4
+  && Math.abs(manual.start - posIn) < 0.35, `${span.toFixed(2)}s, in-point off by ${(manual.start - posIn).toFixed(2)}s`);
 await frame.evaluate(() => window.__djclanker.decks.A.exitLoop());
 
 /* --------------------------- downbeat + DROP --------------------------- */
@@ -378,16 +383,27 @@ const savedGrid = await frame.evaluate(() => {
   if (!A.playing) A.play();
   return { bpm: A.bpm, beatOffset: A.beatOffset, barOffset: A.barOffset };
 });
+// Tap in-page and score the detector against the tempo that was ACTUALLY
+// tapped, not against the nominal 500 ms: a busy page fires setTimeout late,
+// the detector faithfully reports the slower tempo, and asserting "≈120 BPM"
+// would fail the feature for the timer's inaccuracy.
 await page.waitForTimeout(600);
-for (let i = 0; i < 6; i++) {
-  await frame.evaluate(() => window.__djclanker.decks.A.tapBeat());
-  await page.waitForTimeout(500);
-}
-const tapped = await frame.evaluate(() => {
+const tapped = await frame.evaluate(async () => {
   const A = window.__djclanker.decks.A;
-  return { bpm: A.bpm, manual: A.bpmManual, off: A.beatOffset };
+  const at = [];
+  for (let i = 0; i < 6; i++) {
+    at.push(A.position);
+    A.tapBeat();
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  const deltas = [];
+  for (let i = 1; i < at.length; i++) deltas.push(at[i] - at[i - 1]);
+  deltas.sort((a, b) => a - b);
+  const median = deltas[Math.floor(deltas.length / 2)];
+  return { bpm: A.bpm, tappedBpm: 60 / median, manual: A.bpmManual, off: A.beatOffset };
 });
-check('tap tempo sets BPM from the taps', Math.abs(tapped.bpm - 120) < 8, `${tapped.bpm} BPM from ~500 ms taps`);
+check('tap tempo matches the tempo actually tapped', Math.abs(tapped.bpm - tapped.tappedBpm) < 1.5,
+  `detected ${tapped.bpm.toFixed(1)} vs tapped ${tapped.tappedBpm.toFixed(1)} BPM`);
 check('tapped BPM is marked manual', tapped.manual === true);
 check('taps anchor the beat grid', Number.isFinite(tapped.off), `beatOffset=${tapped.off && tapped.off.toFixed(3)}s`);
 await frame.evaluate((g) => {

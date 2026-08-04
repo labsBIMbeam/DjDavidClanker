@@ -161,21 +161,14 @@ html, body {
 
 /* Battle layout: tops flank the vertical master, the crossfader runs full
    width between tops and bottoms, channel strips split in the middle. */
-.stage {
+.stage { display: flex; flex-direction: column; gap: 12px; }
+.stage-top,
+.stage-bottom {
   display: grid;
-  grid-template-columns: 1fr minmax(200px, auto) 1fr;
-  grid-template-areas:
-    "atop mid btop"
-    "abot mbot bbot";
+  grid-template-columns: 1fr auto 1fr;
   gap: 12px;
   align-items: stretch;
 }
-.stage > .deck-top.deck-A { grid-area: atop; }
-.stage > .deck-top.deck-B { grid-area: btop; }
-.stage > .master-col { grid-area: mid; }
-.stage > .deck-bottom.deck-A { grid-area: abot; }
-.stage > .deck-bottom.deck-B { grid-area: bbot; }
-.stage > .channel-wrap { grid-area: mbot; }
 
 .master-col {
   background: linear-gradient(180deg, var(--panel-2), var(--panel));
@@ -184,6 +177,7 @@ html, body {
   padding: 12px;
   display: flex; flex-direction: column; align-items: center; gap: 8px;
   height: 100%;
+  min-width: 110px; /* narrow by design — it only holds fader + meter */
 }
 .master-vert { display: flex; gap: 10px; align-items: stretch; justify-content: center; flex: 1; min-height: 180px; }
 input[type=range].master { height: 100%; }
@@ -739,10 +733,8 @@ input[type=range].am-fade::-moz-range-thumb { width: 14px; height: 14px; border-
 
 @media (max-width: 1000px) {
   .decks { grid-template-columns: 1fr; }
-  .stage {
-    grid-template-columns: 1fr;
-    grid-template-areas: "atop" "btop" "mid" "abot" "bbot" "mbot";
-  }
+  .stage-top,
+  .stage-bottom { grid-template-columns: 1fr; }
   .master-vert { min-height: 120px; }
   .mixer { grid-template-columns: 1fr; gap: 10px; }
   .browser-main { grid-template-columns: 1fr; }

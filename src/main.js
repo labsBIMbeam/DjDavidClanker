@@ -50,12 +50,16 @@ const strip = MixerStrip(mixer, { onPublishSet: publishCurrentSet, onSettings: s
 // column; both channel strips (EQ, filter, volume, cue) sit split in the
 // middle like a real 2-channel mixer. The cue/crossfader/actions bar goes
 // below the stage, right above the track browser.
-deckWrap.appendChild(panelA.top);
-deckWrap.appendChild(strip.middle);
-deckWrap.appendChild(panelB.top);
-deckWrap.appendChild(panelA.bottom);
-deckWrap.appendChild(h('div', { class: 'channel-wrap' }, panelA.channelStrip, panelB.channelStrip));
-deckWrap.appendChild(panelB.bottom);
+// Two independent grid rows rather than one shared grid: the middle column
+// carries a narrow MASTER on top and the two wide channel strips below, and
+// a shared grid would size both to the wider one — leaving dead space either
+// side of the master.
+deckWrap.appendChild(h('div', { class: 'stage-top' },
+  panelA.top, strip.middle, panelB.top));
+deckWrap.appendChild(h('div', { class: 'stage-bottom' },
+  panelA.bottom,
+  h('div', { class: 'channel-wrap' }, panelA.channelStrip, panelB.channelStrip),
+  panelB.bottom));
 app.appendChild(strip.xfRow);
 
 const browser = Browser({
