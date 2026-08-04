@@ -25,23 +25,23 @@ export function MixerStrip(mixer, { onPublishSet, onSettings, onOutputs }) {
   const vu = h('div', { class: 'vu vu-master' }, h('div', { class: 'vu-fill' }));
 
   const cueVol = fader({
-    min: 0, max: 1, step: 0.01, value: mixer.cueVolume, orient: 'h', label: 'Kopfhörer-Lautstärke',
+    min: 0, max: 1, step: 0.01, value: mixer.cueVolume, orient: 'h', label: 'Headphone volume',
     className: 'cuevol',
     onInput: (v) => mixer.setCueVolume(v),
   });
 
   const btnCenter = h('button', {
-    class: 'btn btn-mini', title: 'Crossfader mittig',
+    class: 'btn btn-mini', title: 'Center the crossfader',
     onclick: () => { mixer.setCrossfader(0); xf.value = '0'; },
   }, '◆');
 
   const btnA = h('button', {
-    class: 'btn btn-mini', title: 'Ganz auf Deck A',
+    class: 'btn btn-mini', title: 'Full deck A',
     onclick: () => { mixer.setCrossfader(-1); xf.value = '-1'; },
   }, 'A');
 
   const btnB = h('button', {
-    class: 'btn btn-mini', title: 'Ganz auf Deck B',
+    class: 'btn btn-mini', title: 'Full deck B',
     onclick: () => { mixer.setCrossfader(1); xf.value = '1'; },
   }, 'B');
 
@@ -64,9 +64,9 @@ export function MixerStrip(mixer, { onPublishSet, onSettings, onOutputs }) {
       cueVol,
     ),
     h('div', { class: 'mixer-actions' },
-      h('button', { class: 'btn btn-ghost', title: 'Setlist als Nostr-Event veröffentlichen', onclick: onPublishSet }, '📡 Setlist'),
-      h('button', { class: 'btn btn-ghost btn-outputs', title: 'Sound-Ausgänge (Master / Kopfhörer)', onclick: onOutputs }, '🔈'),
-      h('button', { class: 'btn btn-ghost', title: 'Einstellungen', onclick: onSettings }, '⚙'),
+      h('button', { class: 'btn btn-ghost', title: 'Publish the setlist as a Nostr event', onclick: onPublishSet }, '📡 Setlist'),
+      h('button', { class: 'btn btn-ghost btn-outputs', title: 'Audio outputs (master / headphones)', onclick: onOutputs }, '🔈'),
+      h('button', { class: 'btn btn-ghost', title: 'Settings', onclick: onSettings }, '⚙'),
     ),
     ),
   );

@@ -219,7 +219,7 @@ check('vinyl disc rendered', discPainted > 200, `${discPainted} lit samples`);
 const turnsA = await frame.evaluate(() => window.__djclanker.decks.A.platterTurns);
 await page.waitForTimeout(900);
 const turnsB = await frame.evaluate(() => window.__djclanker.decks.A.platterTurns);
-check('disc rotates with playback', turnsB > turnsA, `+${(turnsB - turnsA).toFixed(2)} Umdrehungen`);
+check('disc rotates with playback', turnsB > turnsA, `+${(turnsB - turnsA).toFixed(2)} revolutions`);
 
 // Live sound waves: deck scope and master scope must both draw non-empty frames.
 const scopeLit = async (sel) => frame.evaluate((s) => {
@@ -263,7 +263,7 @@ await page.screenshot({ path: `${OUT}-desktop.png`, fullPage: true });
 // transition happens in seconds instead of at the end of a 7-minute track.
 await frame.locator('.tab').first().click();
 await frame.waitForSelector('.track-row');
-await frame.locator('.automix .btn-mini').filter({ hasText: 'Liste' }).click();
+await frame.locator('.automix .btn-mini').filter({ hasText: 'List' }).click();
 const queued = await frame.evaluate(() => window.__djclanker.automix.queue.length);
 check('automix queue filled from browser', queued > 5, `${queued} Tracks`);
 

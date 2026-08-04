@@ -38,7 +38,7 @@ check('artist view listed', artistRows === 10, `${artistRows} rows`);
 
 // "+ alle → Playlist" puts the whole list into the crate.
 await frame.locator('.btn-addall').click();
-await frame.locator('.browser-h2', { hasText: /hinzugefügt/ }).waitFor({ timeout: 10000 });
+await frame.locator('.browser-h2', { hasText: /added to playlist/ }).waitFor({ timeout: 10000 });
 check('added all listed tracks to playlist', true);
 
 // Crate tab: playlist menu shows every track, list auto-opens the playlist.
@@ -53,7 +53,7 @@ check('playlist view shows all tracks', plRows === 10, `${plRows} rows`);
 await frame.locator('.tab').nth(1).click();
 await frame.locator('.search-input').first().fill('bitcoin');
 await frame.locator('.side-group .btn-primary').click();
-await frame.locator('.browser-h1', { hasText: 'Suche: bitcoin' }).waitFor({ timeout: 25000 });
+await frame.locator('.browser-h1', { hasText: 'Search: bitcoin' }).waitFor({ timeout: 25000 });
 const searchRows = await frame.locator('.track-row').count();
 check('search found other tracks', searchRows > 0, `${searchRows} rows`);
 const addedTitle = (await frame.locator('.track-row .row-title').first().textContent()).trim();

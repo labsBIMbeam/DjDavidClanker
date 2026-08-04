@@ -238,7 +238,7 @@ export class Deck extends Emitter {
       } catch (e) {
         if (token !== this._loadToken) return;
         this.status = 'error';
-        this.error = `Datei nicht dekodierbar: ${(e && e.message) || e}`;
+        this.error = `File could not be decoded: ${(e && e.message) || e}`;
         this.emit('error');
       }
       return;
@@ -287,7 +287,7 @@ export class Deck extends Emitter {
 
     if (token !== this._loadToken) return;
     this.status = 'error';
-    this.error = (lastErr && lastErr.message) || 'Track konnte nicht geladen werden';
+    this.error = (lastErr && lastErr.message) || 'Track could not be loaded';
     this.emit('error');
   }
 

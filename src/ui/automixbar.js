@@ -4,7 +4,7 @@ import { h, fader } from './dom.js';
 export function AutomixBar(automix, { onQueueFromBrowser }) {
   const btnOn = h('button', {
     class: 'btn btn-automix',
-    title: 'Automix: lädt, beatmatcht und blendet automatisch weiter (X)',
+    title: 'Automix: loads, beatmatches and crossfades on its own (X)',
     onclick: () => {
       if (!automix.enabled && !automix.queue.length) onQueueFromBrowser();
       automix.toggle();
@@ -14,22 +14,22 @@ export function AutomixBar(automix, { onQueueFromBrowser }) {
 
   const btnNext = h('button', {
     class: 'btn btn-mini',
-    title: 'Jetzt überblenden (N)',
+    title: 'Crossfade now (N)',
     onclick: () => automix.skip(),
   }, '⏭');
 
   const btnLoad = h('button', {
     class: 'btn btn-mini',
-    title: 'Aktuelle Browser-Liste als Automix-Queue übernehmen',
+    title: 'Take the current browser list as the automix queue',
     onclick: () => { onQueueFromBrowser(); render(); },
-  }, '⤓ Liste');
+  }, '⤓ List');
 
-  const label = h('span', { class: 'am-label' }, 'AUS');
+  const label = h('span', { class: 'am-label' }, 'OFF');
   const detail = h('span', { class: 'am-detail' }, '');
 
   const fadeVal = h('span', { class: 'am-num' }, `${automix.fadeSeconds}s`);
   const fadeFader = fader({
-    min: 2, max: 45, step: 1, value: automix.fadeSeconds, orient: 'h', label: 'Überblendzeit',
+    min: 2, max: 45, step: 1, value: automix.fadeSeconds, orient: 'h', label: 'Crossfade length',
     className: 'am-fade',
     onInput: (v) => {
       automix.fadeSeconds = v;
@@ -42,8 +42,8 @@ export function AutomixBar(automix, { onQueueFromBrowser }) {
     b._sync = () => b.classList.toggle('on', get());
     return b;
   };
-  const btnSync = toggle('SYNC', () => automix.syncTempo, (v) => { automix.syncTempo = v; }, 'Nächstes Deck vor dem Übergang auf die BPM ziehen');
-  const btnShuffle = toggle('SHUFFLE', () => automix.shuffle, (v) => { automix.shuffle = v; }, 'Zufällige Reihenfolge statt Listenreihenfolge');
+  const btnSync = toggle('SYNC', () => automix.syncTempo, (v) => { automix.syncTempo = v; }, 'Pull the next deck onto the BPM before the transition');
+  const btnShuffle = toggle('SHUFFLE', () => automix.shuffle, (v) => { automix.shuffle = v; }, 'Random order instead of list order');
 
   const meter = h('div', { class: 'am-meter' }, h('div', { class: 'am-meter-fill' }));
 

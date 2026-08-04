@@ -13,7 +13,7 @@ export function trackFromFile(file) {
   return {
     id: `local-${Date.now()}-${seq++}`,
     title: m ? m[2].trim() : base,
-    artist: m ? m[1].trim() : 'Lokale Datei',
+    artist: m ? m[1].trim() : 'Local file',
     artistId: '',
     artistUrl: '',
     artistNpub: '',

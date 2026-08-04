@@ -103,7 +103,7 @@ export async function resolvePlaylist(playlist, { concurrency = 5 } = {}) {
  * The shell signs; the napplet never sees a key.
  */
 export async function publishSetlist(tracks, { title, description } = {}) {
-  if (!tracks.length) throw new Error('Setlist ist leer');
+  if (!tracks.length) throw new Error('Setlist is empty');
   const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
   const tags = [
     ['d', `dj-david-clanker-${stamp}`],
