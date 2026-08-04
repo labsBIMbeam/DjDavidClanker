@@ -27,6 +27,14 @@ export function LevelMeter(getLevel, { orient = 'h', length = 220, thickness = 1
   }
 
   function draw() {
+    // CSS is the single source of truth for the size: match the backing
+    // buffer to the laid-out box so the segments stay crisp instead of being
+    // scaled from the construction-time dimensions.
+    const cssW = canvas.clientWidth || canvas.width;
+    const cssH = canvas.clientHeight || canvas.height;
+    if (canvas.width !== cssW) canvas.width = cssW;
+    if (canvas.height !== cssH) canvas.height = cssH;
+
     const level = Math.max(0, Math.min(1, getLevel() || 0));
     const now = performance.now();
     // Fast attack, slow release — classic meter ballistics.

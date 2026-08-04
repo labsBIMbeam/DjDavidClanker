@@ -176,11 +176,19 @@ html, body {
   border-radius: var(--radius);
   padding: 12px;
   display: flex; flex-direction: column; align-items: center; gap: 8px;
-  height: 100%;
+  /* No `height: 100%` here: the grid already stretches this item, and a
+     percentage would chain into the children with no definite base to
+     resolve against — which inflated the whole row to viewport height. */
   min-width: 110px; /* narrow by design — it only holds fader + meter */
 }
 .master-vert { display: flex; gap: 10px; align-items: stretch; justify-content: center; flex: 1; min-height: 180px; }
-input[type=range].master { height: 100%; }
+/* Fader and meter share one height, via flex cross-axis stretch rather than
+   `height: 100%`: the row is content-sized, so a percentage has no definite
+   base and Chrome falls back to the viewport — which inflated the whole
+   stage. The two-class selector is needed because the generic `.fader-v`
+   rule (fixed 132px) is defined later at equal specificity. */
+input[type=range].fader-v.master { height: auto; align-self: stretch; }
+.master-vert .meter-canvas { height: auto; align-self: stretch; width: 18px; flex: none; }
 .master-col .cuevol { width: 100%; }
 .master-col .mixer-actions { flex-wrap: wrap; justify-content: center; }
 
