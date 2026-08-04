@@ -93,7 +93,8 @@ src/
 dev/
   shell.html            minimal NIP-5D host shell
   serve-shell.mjs       static server + fetch proxy
-  smoke.mjs             Playwright E2E (40 checks; three sibling suites exist)
+  smoke.mjs             Playwright E2E (40 checks; four sibling suites exist)
+  automix-check.mjs     three tracks in a row — guards the second handover
 ```
 
 A single `requestAnimationFrame` loop in `main.js` drives everything:
@@ -155,7 +156,7 @@ time (`preloadLead`, default 35 s — fetch + decode take real seconds) → at
 `fadeSeconds` remaining, pull to the BPM, start, drive the crossfader over →
 swap roles.
 
-Two behaviors that grew out of bugs:
+Three behaviors that grew out of bugs:
 
 - **`start()` adopts what's already playing.** Switching Automix on mid-set
   doesn't start from zero; it adopts the running deck and stops a possible
@@ -164,15 +165,31 @@ Two behaviors that grew out of bugs:
   Previously that blocked every transition — Automix stood still without
   reporting an error. Silently blocking is the worse bug.
 
+- **The deck that just handed over is marked stale (`staleId`).** After a
+  transition it still holds its played-out track at status `'ready'` — which
+  is byte-for-byte indistinguishable from a deck a human cued on purpose, and
+  those are deliberately kept (below). Without the marker the preload skipped
+  loading from the *second* transition on and the mix ping-ponged between the
+  same two tracks forever. The one-handover smoke test never saw it; that is
+  what `dev/automix-check.mjs` exists for.
+
 An idle deck that was already cued manually is **kept and played next** —
-that's intentional.
+that's intentional, and it is exactly why `staleId` has to exist to tell the
+two cases apart.
 
 ---
 
 ## 4. What is verified
 
 `node dev/smoke.mjs` drives the real app in the real sandboxed iframe against
-the real Wavlake API. No mocks except the Nostr fixture. Last run: **42/42**.
+the real Wavlake API. No mocks except the Nostr fixture. Last run: **40/40**,
+plus the sibling suites `fx-sync-check` (48), `automix-check` (5),
+`playlist-check` (9) and `local-check` (7) — 109 checks in total.
+
+**Lesson worth keeping:** the smoke suite drove exactly *one* automix
+handover for months, and a bug that only appears on the second one lived
+happily behind that green check. When a suite covers a cycle, make it run the
+cycle at least twice.
 
 Covered: boot and `window.napplet` injection, charts via `resource.bytes`,
 FULL-mode decoding, waveform, BPM (92.5 measured), scratch direction *and*

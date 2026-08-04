@@ -45,6 +45,14 @@ export class Automix {
     this.busy = false; // a load is in flight
     this.pending = null; // track staged on the idle deck
     this.lastError = '';
+
+    /**
+     * The deck that just handed over. It still holds its played-out track at
+     * status 'ready', which is indistinguishable from a deck a human cued on
+     * purpose — and the preload below deliberately keeps those. Without this
+     * marker the mix ping-pongs between the same two tracks forever.
+     */
+    this.staleId = null;
   }
 
   /* ------------------------------ queue ------------------------------ */
@@ -158,6 +166,7 @@ export class Automix {
   async _loadInto(deck, track) {
     this.busy = true;
     this.pending = track;
+    if (this.staleId === deck.id) this.staleId = null; // it's being refilled
     this.onStatus('loading');
     try {
       await deck.load(track);
@@ -193,6 +202,7 @@ export class Automix {
     this.onCrossfade(this.fade.to);
     this.fade = null;
     live.pause();
+    this.staleId = live.id; // played out — free to be refilled
     this.liveId = idle.id;
     if (idle.track) {
       this.history.push(idle.track);
@@ -206,9 +216,10 @@ export class Automix {
     if (!this.enabled || this.busy) return;
     const decks = this.mixer.decks;
 
-    // Cold start: nothing is live yet.
+    // Cold start: nothing is live yet. Prefer an empty deck so a track a
+    // human cued by hand survives; fall back to A when both are occupied.
     if (!this.liveId) {
-      const free = decks.A.status === 'ready' && !decks.A.playing ? decks.A : decks.A;
+      const free = !decks.A.track ? decks.A : (!decks.B.track ? decks.B : decks.A);
       const track = this._takeNext();
       if (!track) {
         this.onStatus('empty');
@@ -263,14 +274,17 @@ export class Automix {
     }
 
     // Stage the next track early: fetching and decoding takes real seconds.
-    // A track someone already cued on the idle deck is kept and played next.
-    if (!this.busy && left < this.preloadLead && (!idle.track || idle.status !== 'ready')) {
+    // A track someone already cued on the idle deck is kept and played next —
+    // unless this deck is the one that just handed over, whose track has
+    // already been played (see `staleId`).
+    const stale = this.staleId === idle.id;
+    if (!this.busy && left < this.preloadLead && (stale || !idle.track || idle.status !== 'ready')) {
       const track = this._takeNext();
-      if (track && (!idle.track || idle.track.id !== track.id)) this._loadInto(idle, track);
+      if (track && (stale || !idle.track || idle.track.id !== track.id)) this._loadInto(idle, track);
       return;
     }
 
-    if (idle.status === 'ready' && !idle.playing && left <= this.fadeSeconds) {
+    if (idle.status === 'ready' && !idle.playing && !stale && left <= this.fadeSeconds) {
       // Never fade longer than what is actually left, or the outro runs out
       // from under the transition.
       this._beginFade(live, idle, Math.min(this.fadeSeconds, Math.max(1.5, left)));
