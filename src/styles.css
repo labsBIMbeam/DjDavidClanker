@@ -450,7 +450,10 @@ input[type=range].pitch::-moz-range-thumb { background: linear-gradient(180deg, 
 .master-row .vu-master { flex: 1; max-width: 90px; }
 .mixer-actions { display: flex; gap: 6px; }
 .mixer-cue { display: flex; flex-direction: column; gap: 4px; }
-.loop-row { display: flex; gap: 4px; align-items: center; }
+.loop-row { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; justify-content: center; }
+.scratch-row { display: flex; gap: 3px; flex-wrap: wrap; justify-content: center; }
+.btn-scratch.on { border-color: var(--zap); color: var(--zap); animation: droppulse .9s ease-in-out infinite; }
+.btn-tap.on { border-color: var(--a); color: var(--a); }
 .loop-row .lbl-sub { margin-right: 2px; }
 .loop-sep { flex: 0 0 6px; }
 .btn-loopbeat.on, .btn-loopexit.on, .btn-loopin.on { border-color: var(--zap); color: var(--zap); }

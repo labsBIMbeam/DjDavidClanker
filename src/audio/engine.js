@@ -94,6 +94,9 @@ export class Deck extends Emitter {
     this.loop = { active: false, start: 0, end: 0, beats: 0 };
     this.syncedTo = null; // other deck while SYNC is latched
     this._lastPhaseSeek = 0;
+    this._taps = []; // tap-tempo ring: { t: wall ms, pos: track seconds }
+    this.autoScratch = null; // active auto-scratch pattern name
+    this._as = null;
 
     /* vinyl */
     this.vinylMode = true;
@@ -208,6 +211,9 @@ export class Deck extends Emitter {
     this.beatOffset = null;
     this.barOffset = null;
     this._drop = null;
+    this._taps = [];
+    this.autoScratch = null;
+    this._as = null;
     this.loop = { active: false, start: 0, end: 0, beats: 0 };
     this.cuePoint = 0;
     this._pausedAt = 0;
@@ -728,6 +734,32 @@ export class Deck extends Emitter {
   tickAudio(dt) {
     const step = clamp(dt, 0, 0.1);
 
+    // Auto-scratch: the scripted hand moves the platter each frame.
+    if (this.autoScratch && this._as && this.scratching) {
+      const as = this._as;
+      const beat = 60 / (this.effectiveBpm || 120);
+      as.t += step;
+      if (as.t >= as.bars * 4 * beat) {
+        this.stopAutoScratch();
+      } else {
+        const ph = (as.t % beat) / beat;
+        let rate = 0;
+        let gate = 1;
+        switch (this.autoScratch) {
+          case 'baby': rate = Math.sin(ph * 2 * Math.PI) * 1.8; break;
+          case 'scribble': rate = Math.sin((as.t / beat) * 8 * Math.PI) * 0.9; break;
+          case 'chirp': rate = ph < 0.5 ? 2.2 : -2.2; gate = ph < 0.5 ? 1 : 0; break;
+          case 'transformer': rate = 0.9; gate = (ph * 4) % 1 < 0.5 ? 1 : 0; break;
+          case 'backspin': rate = -(2 + (as.t / (as.bars * 4 * beat)) * 10); break;
+          default: break;
+        }
+        this.movePlatter(rate * step, step);
+        if (this._graph) {
+          this._graph.gain.gain.setTargetAtTime(gate * this.volume * this.trim, this.mixer.ctx.currentTime, 0.004);
+        }
+      }
+    }
+
     if (this._mode === 'platter' && !this.scratching) {
       if (this.rewinding) {
         // Torque builds with hold time: -4x after ~0.2 s, floored at -14x.
@@ -858,6 +890,79 @@ export class Deck extends Emitter {
 
     if (typeof other === 'object' && other && other.playing && this.playing) this.alignPhase(other);
     return true;
+  }
+
+  /**
+   * Tap tempo: call once per beat you hear. Works off playback-position
+   * deltas, so the result is the track's BASE bpm no matter where the tempo
+   * fader sits. From the fourth tap on, bpm and the beat grid are set (and
+   * marked manual so the detector won't overwrite them); further taps refine.
+   */
+  tapBeat() {
+    if (this.backend !== 'buffer' || !this.playing) return { count: 0, bpm: 0 };
+    const now = performance.now();
+    if (this._taps.length && now - this._taps[this._taps.length - 1].t > 2000) this._taps = [];
+    this._taps.push({ t: now, pos: this.position });
+    if (this._taps.length > 9) this._taps.shift();
+
+    const n = this._taps.length;
+    if (n >= 4) {
+      const deltas = [];
+      for (let i = 1; i < n; i++) deltas.push(this._taps[i].pos - this._taps[i - 1].pos);
+      deltas.sort((a, b) => a - b);
+      const beatLen = deltas[Math.floor(deltas.length / 2)]; // median beats jitter
+      if (beatLen > 0.2 && beatLen < 2) {
+        this.bpm = Math.round((60 / beatLen) * 100) / 100;
+        this.bpmManual = true;
+        // Circular mean of the tap phases anchors the grid on the taps.
+        let sx = 0;
+        let sy = 0;
+        for (const tap of this._taps) {
+          const ph = ((tap.pos % beatLen) / beatLen) * 2 * Math.PI;
+          sx += Math.cos(ph);
+          sy += Math.sin(ph);
+        }
+        const phase = (Math.atan2(sy, sx) / (2 * Math.PI) + 1) % 1;
+        this.beatOffset = phase * beatLen;
+        this.barOffset = this.beatOffset; // taps give the beat, not the 1
+        this.emit('bpm');
+      }
+    }
+    this.emit('tap');
+    return { count: n, bpm: n >= 4 ? this.bpm : 0 };
+  }
+
+  /* ---------------------------- auto-scratch ---------------------------- */
+
+  /**
+   * Scripted turntablism: beat-synced hand gestures over the granular
+   * platter, driven from tickAudio (no timers of its own). Volume gating for
+   * chirp/transformer cuts the deck channel, not the crossfader.
+   */
+  toggleAutoScratch(pattern) {
+    if (this.autoScratch === pattern) return this.stopAutoScratch();
+    return this.startAutoScratch(pattern);
+  }
+
+  startAutoScratch(pattern) {
+    if (!this.canVinyl || !this._reverse || !this.bpm) return false;
+    this.stopAutoScratch();
+    this.touchPlatter();
+    this.autoScratch = pattern;
+    this._as = { t: 0, bars: pattern === 'backspin' ? 1 : 2 };
+    this.emit('scratch');
+    return true;
+  }
+
+  stopAutoScratch() {
+    if (!this.autoScratch) return;
+    this.autoScratch = null;
+    this._as = null;
+    if (this._graph) {
+      this._graph.gain.gain.setTargetAtTime(this.volume * this.trim, this.mixer.ctx.currentTime, 0.01);
+    }
+    this.releasePlatter();
+    this.emit('scratch');
   }
 
   /** Latch or release SYNC. While latched, tickAudio keeps the phase locked. */

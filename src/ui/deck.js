@@ -79,6 +79,21 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
   const platter = record.root;
   const jogHint = h('div', { class: 'jog-hint' }, 'VINYL');
 
+  const SCRATCH_PATTERNS = [
+    ['BABY', 'baby'],
+    ['SCRB', 'scribble'],
+    ['CHRP', 'chirp'],
+    ['TRNS', 'transformer'],
+    ['BSPN', 'backspin'],
+  ];
+  const scratchBtns = SCRATCH_PATTERNS.map(([label, id]) =>
+    h('button', {
+      class: 'btn btn-mini btn-scratch',
+      title: `Auto-scratch: ${id} (beat-synced, runs a couple of bars)`,
+      onclick: () => deck.toggleAutoScratch(id),
+    }, label));
+  const scratchRow = h('div', { class: 'scratch-row' }, ...scratchBtns);
+
   // Live signal straight off this deck's analyser — the moving counterpart to
   // the static overview waveform above it.
   const scope = Scope(() => (deck._graph ? deck._graph.analyser : null), {
@@ -123,6 +138,11 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
     },
   });
   const bpmLive = h('span', { class: 'bpm-live' }, '—');
+  const btnTap = h('button', {
+    class: 'btn btn-mini btn-tap',
+    title: 'Tap tempo: hit this on every beat — from the 4th tap BPM and beat grid are set for the whole track',
+    onclick: () => deck.tapBeat(),
+  }, 'TAP');
   const btnSync = h('button', { class: 'btn btn-sync', title: 'Latch tempo and beat phase onto the other deck' }, 'SYNC');
   const btnDrop = h('button', {
     class: 'btn btn-mini btn-drop',
@@ -394,19 +414,21 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
       ),
       h('div', { class: 'deck-head-actions' }, btnZap, btnEject),
     ),
+    fxSection,
     waveWrap,
-    loopRow,
     scope.root,
     h('div', { class: 'deck-body' },
       h('div', { class: 'deck-jog' }, platter, jogHint,
         h('div', { class: 'transport' }, btnRew, btnCue, btnPlay),
+        loopRow,
         btnVinyl,
+        scratchRow,
       ),
       h('div', { class: 'deck-tempo' },
         h('div', { class: 'bpm-box' },
           h('label', { class: 'lbl' }, 'BPM'),
           h('div', { class: 'bpm-live-wrap', title: 'Effective BPM — follows the tempo fader' }, bpmLive),
-          h('div', { class: 'bpm-base-row' }, h('span', { class: 'lbl-sub' }, 'BASE'), bpmField),
+          h('div', { class: 'bpm-base-row' }, h('span', { class: 'lbl-sub' }, 'BASE'), bpmField, btnTap),
         ),
         btnSync,
         btnDrop,
@@ -423,7 +445,6 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
       ),
       h('div', { class: 'deck-chan' }, h('label', { class: 'lbl' }, 'VOL'), h('div', { class: 'chan-row' }, volFader, vu), btnPfl),
     ),
-    fxSection,
   );
 
   /* ------------------------- rendering ------------------------- */
@@ -618,6 +639,13 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
     const loopReady = deck.backend === 'buffer' && deck.status === 'ready';
     for (const b of [btnLoopIn, btnLoopOut, ...beatLoopBtns, btnLoopExit]) b.disabled = !loopReady;
     btnLoopOut.disabled = !loopReady || deck.loop.active;
+
+    const scratchReady = deck.canVinyl && Boolean(deck._reverse) && deck.bpm > 0;
+    scratchBtns.forEach((b, i) => {
+      b.disabled = !scratchReady;
+      b.classList.toggle('on', deck.autoScratch === SCRATCH_PATTERNS[i][1]);
+    });
+    btnTap.disabled = deck.backend !== 'buffer';
     beatLoopBtns.forEach((b, i) => b.classList.toggle('on', deck.loop.active && deck.loop.beats === LOOP_BEATS[i]));
     btnLoopExit.classList.toggle('on', deck.loop.active);
     btnLoopIn.classList.toggle('on', !deck.loop.active && deck.loop.start > 0 && deck.loop.end === 0);
@@ -678,6 +706,12 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
       record.invalidate();
     }
     if (what === 'load') setZoom(1);
+    if (what === 'tap') {
+      const n = deck._taps.length;
+      btnTap.textContent = n > 0 && n < 4 ? `TAP ${n}` : 'TAP';
+      btnTap.classList.add('on');
+      setTimeout(() => btnTap.classList.remove('on'), 120);
+    }
     render();
   });
 

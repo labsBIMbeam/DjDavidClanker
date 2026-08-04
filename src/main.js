@@ -329,6 +329,7 @@ function showHelp() {
     ['S / L', 'Deck A / B rewind — hold to speed up'],
     ['V / B', 'Deck A / B toggle VINYL vs CDJ'],
     ['E / I', 'Deck A / B pre-listen (🎧 cue bus)'],
+    ['T / U', 'Deck A / B tap tempo — tap every beat, 4+ taps set BPM and grid'],
     ['F / G', 'Deck A FX slot 1 / 2'],
     ['H / J', 'Deck B FX slot 1 / 2'],
     [', / .', 'Crossfader left / right'],
@@ -421,6 +422,8 @@ document.addEventListener('keydown', (e) => {
     case 'b': B.vinylMode = !B.vinylMode; B.emit('mode'); break;
     case 'e': A.setCue(); break;
     case 'i': B.setCue(); break;
+    case 't': A.tapBeat(); break;
+    case 'u': B.tapBeat(); break;
     case 'f': A.toggleFx(A.fxSlots[0]); break;
     case 'g': A.toggleFx(A.fxSlots[1]); break;
     case 'h': B.toggleFx(B.fxSlots[0]); break;
