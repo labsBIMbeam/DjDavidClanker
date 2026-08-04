@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NIP-5D dev shell — DJ David Clanker</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #05060a; color: #cfd6e2;
+        font: 13px system-ui, sans-serif; }
+      .bar { display: flex; align-items: center; gap: 10px; padding: 6px 12px;
+        background: #0d1118; border-bottom: 1px solid #1e2531; }
+      .bar b { font-family: ui-monospace, monospace; letter-spacing: .1em; font-size: 11px; color: #7f8b9e; }
+      .bar .dot { width: 8px; height: 8px; border-radius: 50%; background: #4ade80; }
+      #log { font-family: ui-monospace, monospace; font-size: 11px; color: #6c7788;
+        max-height: 88px; overflow: auto; padding: 4px 12px; background: #080a0f;
+        border-bottom: 1px solid #1e2531; white-space: pre-wrap; }
+      iframe { width: 100%; height: calc(100vh - 150px); border: 0; display: block; background: #08090c; }
+    </style>
+  </head>
+  <body>
+    <div class="bar">
+      <span class="dot"></span>
+      <b>NIP-5D DEV SHELL</b>
+      <span id="who"></span>
+      <button id="toggleId">Identität wechseln</button>
+      <button id="clearLog">Log leeren</button>
+    </div>
+    <pre id="log"></pre>
+    <iframe id="frame" sandbox="allow-scripts" title="napplet"></iframe>
+
+    <script type="module">
+      /* --------------------------------------------------------------
+       * A deliberately small NIP-5D host: enough of the wire protocol to
+       * exercise the napplet end to end. Not a conformant shell.
+       * ------------------------------------------------------------ */
+
+      const logEl = document.getElementById('log');
+      const lines = [];
+      const log = (...a) => {
+        lines.push(a.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))).join(' '));
+        if (lines.length > 200) lines.shift();
+        logEl.textContent = lines.slice(-40).join('\n');
+        logEl.scrollTop = logEl.scrollHeight;
+      };
+      document.getElementById('clearLog').onclick = () => { lines.length = 0; logEl.textContent = ''; };
+
+      const DOMAINS = ['resource', 'identity', 'storage', 'outbox', 'relay', 'common', 'link', 'media'];
+
+      // Fake signed-in identity. Any 64-hex string works for the UI.
+      let pubkey = 'e88a691e98d9987c964521dff60025f60700378a4879180dcbbb4a5027850411';
+      const ALT = '3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d';
+      document.getElementById('who').textContent = pubkey.slice(0, 12) + '…';
+
+      const proxy = (u) => `/proxy?url=${encodeURIComponent(u)}`;
+      const storage = new Map();
+
+      // A canned kind-30003 set so the Nostr tab has something to resolve.
+      const FIXTURE_SET = {
+        id: 'fixture-set-1',
+        kind: 30003,
+        pubkey,
+        created_at: Math.floor(Date.now() / 1000),
+        content: '',
+        tags: [
+          ['d', 'clanker-demo'],
+          ['title', 'Clanker Demo Crate'],
+          ['r', 'https://wavlake.com/track/291db454-5f11-488d-afd2-861f4dd7cf9c'],
+          ['r', 'https://wavlake.com/track/d5d82e59-fd4b-4c23-8f15-540e28f251d4'],
+          ['r', 'https://wavlake.com/track/056e3247-a557-4690-90f2-232524fc5a8b'],
+        ],
+      };
+
+      let frameWin = null;
+      const post = (msg) => frameWin && frameWin.postMessage(msg, '*');
+
+      async function handle(msg) {
+        const { type, id } = msg;
+        switch (type) {
+          /* ---------------- resource ---------------- */
+          case 'resource.info':
+            return post({ type: 'resource.info.result', id, info: { schemes: ['https', 'data'], maxBytes: 64 * 1024 * 1024 } });
+          case 'resource.bytes': {
+            try {
+              const r = await fetch(proxy(msg.url));
+              if (!r.ok) throw new Error(`upstream ${r.status}`);
+              const blob = await r.blob();
+              log('resource.bytes ok', String(blob.size), msg.url.slice(0, 72));
+              return post({ type: 'resource.bytes.result', id, blob, mime: blob.type || 'application/octet-stream' });
+            } catch (e) {
+              log('resource.bytes FAIL', msg.url.slice(0, 72), e.message);
+              return post({ type: 'resource.bytes.error', id, error: 'fetch-failed', message: e.message });
+            }
+          }
+          case 'resource.bytesMany': {
+            const items = [];
+            for (const u of msg.urls || []) {
+              try {
+                const r = await fetch(proxy(u));
+                const blob = await r.blob();
+                items.push({ url: u, ok: true, blob, mime: blob.type });
+              } catch (e) {
+                items.push({ url: u, ok: false, error: 'fetch-failed', message: e.message });
+              }
+            }
+            return post({ type: 'resource.bytesMany.result', id, items });
+          }
+
+          /* ---------------- identity ---------------- */
+          case 'identity.getPublicKey':
+            return post({ type: 'identity.getPublicKey.result', id, pubkey });
+          case 'identity.getProfile':
+            return post({ type: 'identity.getProfile.result', id, profile: { name: 'dev', lud16: '' } });
+          case 'identity.getRelays':
+            return post({ type: 'identity.getRelays.result', id, relays: ['wss://relay.damus.io'] });
+
+          /* ---------------- storage ---------------- */
+          case 'storage.get':
+            return post({ type: 'storage.get.result', id, value: storage.has(msg.key) ? storage.get(msg.key) : null });
+          case 'storage.set':
+            storage.set(msg.key, msg.value);
+            return post({ type: 'storage.set.result', id });
+          case 'storage.remove':
+            storage.delete(msg.key);
+            return post({ type: 'storage.remove.result', id });
+          case 'storage.keys':
+            return post({ type: 'storage.keys.result', id, keys: [...storage.keys()] });
+
+          /* ---------------- nostr ---------------- */
+          case 'outbox.query':
+          case 'relay.query': {
+            const filters = [].concat(msg.filters || []);
+            const wantsSets = filters.some((f) => (f.kinds || []).some((k) => k === 30003 || k === 30078));
+            const events = wantsSets ? [{ event: FIXTURE_SET }] : [];
+            log(type, `${events.length} event(s)`);
+            return post({ type: `${type}.result`, id, events });
+          }
+          case 'outbox.publish':
+          case 'relay.publish': {
+            const ev = { ...(msg.event || {}), id: 'dev' + Math.random().toString(16).slice(2, 10), pubkey, sig: 'de'.repeat(64) };
+            log(type, 'kind', String(ev.kind), (ev.tags || []).length + ' tags');
+            return post({ type: `${type}.result`, id, ok: true, event: ev, eventId: ev.id, relays: { 'wss://dev': true } });
+          }
+          case 'common.getProfile':
+            return post({ type: 'common.getProfile.result', id, ok: true, profile: { name: 'artist', lud16: '' } });
+
+          /* ---------------- link ---------------- */
+          case 'link.open':
+            log('link.open', msg.url.slice(0, 90));
+            window.open(msg.url, '_blank', 'noopener');
+            return post({ type: 'link.open.result', id, status: 'opened' });
+
+          default:
+            if (type && !String(type).endsWith('.result')) log('unhandled', type);
+        }
+      }
+
+      window.addEventListener('message', (e) => {
+        if (!frameWin || e.source !== frameWin) return;
+        const msg = e.data;
+        if (!msg || typeof msg.type !== 'string') return;
+        handle(msg);
+      });
+
+      document.getElementById('toggleId').onclick = () => {
+        pubkey = pubkey === ALT ? 'e88a691e98d9987c964521dff60025f60700378a4879180dcbbb4a5027850411' : ALT;
+        document.getElementById('who').textContent = pubkey.slice(0, 12) + '…';
+        post({ type: 'identity.changed', pubkey });
+      };
+
+      (async function boot() {
+        const [napplet, prelude] = await Promise.all([
+          fetch('/napplet.html').then((r) => r.text()),
+          fetch('/prelude.js').then((r) => r.text()),
+        ]);
+
+        const boot =
+          `<script>${prelude}<\/script>` +
+          `<script>globalThis.NappletShimPrelude.install(${JSON.stringify({ domains: DOMAINS })});<\/script>`;
+
+        // The prelude must run before any authored script — inject at <head>.
+        const srcdoc = napplet.includes('<head>')
+          ? napplet.replace('<head>', `<head>${boot}`)
+          : boot + napplet;
+
+        const frame = document.getElementById('frame');
+        frame.srcdoc = srcdoc;
+        frame.addEventListener('load', () => {
+          frameWin = frame.contentWindow;
+          log('napplet geladen,', String(srcdoc.length), 'bytes srcdoc');
+        });
+      })();
+    </script>
+  </body>
+</html>

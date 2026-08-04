@@ -1,0 +1,21 @@
+{
+  "name": "dj-david-clanker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "DJ David Clanker - a two-deck DJ napplet (NIP-5D) for Wavlake value4value music",
+  "scripts": {
+    "dev": "vite --port 5173 --host 127.0.0.1",
+    "build": "vite build",
+    "preview": "vite preview --port 4173 --host 127.0.0.1",
+    "shell": "vite build && node dev/serve-shell.mjs"
+  },
+  "dependencies": {
+    "@napplet/sdk": "^0.27.2"
+  },
+  "devDependencies": {
+    "@napplet/shim": "^0.29.2",
+    "@napplet/vite-plugin": "^0.14.1",
+    "vite": "^8.2.0"
+  }
+}
