@@ -1,180 +1,206 @@
 # DJ David Clanker
 
-Ein Zwei-Deck-DJ-Mixer für [Wavlake](https://wavlake.com)-Musik, gebaut als
-**Napplet** nach [NIP-5D](https://github.com/nostr-protocol/nips/pull/2303) —
-eine sandboxed Single-Purpose-App, die Signing, Storage, Relays und Netzwerk an
-eine Host-Shell delegiert.
+A two-deck DJ mixer for [Wavlake](https://wavlake.com) music, built as a
+**napplet** per [NIP-5D](https://github.com/nostr-protocol/nips/pull/2303) —
+a sandboxed single-purpose app that delegates signing, storage, relays and
+network access to a host shell.
 
 ```
-┌────────── Host-Shell (NIP-5D) ──────────────────────────────┐
+┌────────── Host shell (NIP-5D) ──────────────────────────────┐
 │  iframe srcdoc, sandbox="allow-scripts", connect-src 'none' │
 │                                                             │
-│   ┌── DJ David Clanker ────────────────────────────────┐    │
-│   │  Deck A ──┐                                        │    │
-│   │           ├─ Crossfader ─ Master ─ Ausgabe         │    │
-│   │  Deck B ──┘                                        │    │
-│   │  Browser: Charts · Suche · Crate · Nostr-Playlists │    │
-│   └────────────────────────────────────────────────────┘    │
+│   ┌── DJ David Clanker ─────────────────────────────────┐   │
+│   │  Deck A ──┐                                         │   │
+│   │           ├─ Crossfader ─ Master ─ Output           │   │
+│   │  Deck B ──┘                                         │   │
+│   │  Browser: Charts · Search · Crate · Nostr playlists │   │
+│   └─────────────────────────────────────────────────────┘   │
 │        │ resource.bytes        │ outbox/relay   │ link.open │
 └────────┼───────────────────────┼────────────────┼───────────┘
-     Wavlake-API + CDN       Nostr-Relays     Lightning-Wallet
+     Wavlake API + CDN       Nostr relays     Lightning wallet
 ```
 
-## Funktionsumfang
+## Features
 
-**Zwei Vinyl-Decks**
-- **Echtes Scratchen**: der Teller ist ein Plattenteller. Ziehen bewegt die
-  Audioposition 1:1 mit der Drehung (33⅓ rpm → eine halbe Umdrehung = 0,9 s),
-  vorwärts wie rückwärts.
-- **Vinyl-Brake und Spin-up**: Stop bremst hörbar aus, Start läuft hoch.
-  Umschaltbar auf CDJ-Modus (sofortiger Start, Teller = Pitchbend).
-- **Dynamischer Rewind**: gedrückt halten, der Backspin beschleunigt bis −14×.
-  Antippen gibt einen Stotterer, halten einen kompletten Rewind.
-- **Echte Scheibe**: Canvas-gezeichnete Platte mit dem Cover als Label,
-  Rillen und wanderndem Lichtreflex. Sie dreht sich mit der *tatsächlichen*
-  Rate — Bremsen, Backspin und Handscratch sieht man direkt.
-- **Wellen-Ring** um die Platte: der ganze Track auf 360° gelegt, stehend
-  (eine mitdrehende Waveform ist unlesbar), abgespielter Teil leuchtet,
-  Nadel-Marker zeigt die Position.
-- Waveform mit Playhead und Cue-Marker, Klick zum Springen
-- CUE nach CDJ-Logik (stehend setzen, laufend zurückspringen)
-- **Tempo-Fader** ±8 / ±16 / ±50 %, BPM-Erkennung, **SYNC** zieht BPM *und*
-  Beat-Phase aufs andere Deck (inkl. Halb-/Doppeltempo)
-- 3-Band-EQ mit Kill, bipolarer Filtersweep (LP ↔ HP), Trim mit Auto-Gain
-- Kanalfader plus VU-Meter je Deck
+**Two vinyl decks**
+- **Real scratching**: the platter is a record platter. Dragging moves the
+  audio position 1:1 with the rotation (33⅓ rpm → half a turn = 0.9 s),
+  forwards and backwards.
+- **Vinyl brake and spin-up**: stop audibly brakes to a halt, start spins up.
+  Switchable to CDJ mode (instant start, platter = pitch bend).
+- **Dynamic rewind**: keep it held and the backspin accelerates up to −14×.
+  A tap gives a stutter, holding gives a complete rewind.
+- **A real disc**: canvas-drawn record with the cover as its label, grooves
+  and a traveling light reflection. It spins at the *actual* rate — braking,
+  backspin and hand scratching are directly visible.
+- **Waveform ring** around the record: the whole track laid onto 360°,
+  stationary (a co-rotating waveform is unreadable), the played part glows,
+  a needle marker shows the position.
+- Waveform with playhead and cue marker, click to jump — zoomable ×1–×64
+  (mouse wheel or −/+) with beat and bar markers anchored to the detected
+  downbeat
+- CUE with CDJ logic (set while stopped, jump back while playing)
+- **Beat loops**: IN/OUT for manual loops, 1/2/4/8 snap onto the detected
+  grid, EXIT leaves
+- **Tempo fader** ±8 / ±16 / ±50 %, BPM detection with beat phase and 4/4
+  downbeat, **SYNC** as a latch: pulls BPM *and* beat phase onto the other
+  deck (incl. half/double tempo) and keeps the phase locked until released
+- **Quantized DROP**: starts the deck sample-accurately on the other deck's
+  next bar-1
+- 3-band EQ with kill, bipolar filter sweep (LP ↔ HP), trim with auto-gain
+- Channel fader plus VU meter per deck
 
-**FX pro Deck** (Insert hinter dem Filter)
-- **Flanger**: modulierte Kurzverzögerung mit Feedback — Rate, Depth, Feedback, Mix
-- **Gater**: tempo-synchron auf der Deck-BPM — Division 1/4…1/32, Duty,
-  Depth, weiche Flanken. Die Gain-Automation wird 0,4 s im Voraus geplant,
-  damit die Flanken sample-genau sitzen und Main-Thread-Jitter egal ist.
+**FX per deck** (insert after the filter)
+- **5 effects in 2 switchable slots**: flanger, phaser, gater, echo, reverb.
+  A dropdown per slot picks which effect the button (or F/G/H/J) toggles;
+  picking an effect already in the other slot swaps the slots.
+- **Flanger**: modulated short delay with feedback — rate, depth, feedback, mix
+- **Gater**: tempo-synced to the deck BPM — division 1/4…1/32, duty, depth,
+  soft edges. The gain automation is scheduled 0.4 s ahead so the edges land
+  sample-accurately and main-thread jitter doesn't matter.
 
-**Soundwellen**
-- Live-Scope pro Deck direkt am eigenen Analyser
-- Großes Master-Scope hinter dem Crossfader — zeigt die Summe, nicht ein Deck
-- Drei Darstellungen umschaltbar: `MIRROR` (gespiegelte Hüllkurve),
-  `WAVE` (Zeitsignal), `BARS` (Spektrum, logarithmisch gebinnt — lineare
-  FFT-Bins verschenken sonst fast die ganze Breite an die Höhen)
+**Waveform scopes**
+- Live scope per deck, fed by its own analyser
+- Large master scope behind the crossfader — shows the sum, not one deck
+- Three display modes: `MIRROR` (mirrored envelope), `WAVE` (time signal),
+  `BARS` (spectrum, logarithmically binned — linear FFT bins would otherwise
+  waste almost the whole width on the highs)
 
 **Automix**
-- Ein Knopf, und die Kiste läuft weiter: nächster Track wird rechtzeitig aufs
-  freie Deck geladen, auf die BPM gezogen und im Outro übergeblendet
-- Queue kommt aus der aktuellen Browser-Liste (`⤓ Liste`), Überblendzeit
-  2–45 s, SYNC und SHUFFLE einzeln schaltbar, `⏭` blendet sofort
-- Greift **nie** in den Audiograph — nutzt dieselben Deck- und Mixer-Methoden
-  wie die Buttons, also kann man jederzeit dazwischenfahren
-- Einschalten mitten im Set übernimmt das laufende Deck, statt neu anzufangen
+- One button and the box keeps going: the next track is loaded onto the free
+  deck in time, pulled to the BPM and crossfaded during the outro
+- The queue comes from the current browser list (`⤓ List`), crossfade time
+  2–45 s, SYNC and SHUFFLE individually switchable, `⏭` fades right now
+- **Never** touches the audio graph — uses the same deck and mixer methods
+  as the buttons, so you can cut in at any time
+- Switching it on mid-set adopts the running deck instead of starting over
 
 **Mixer**
-- Crossfader mit Konstant-Power-Kurve, Master mit Pegelanzeige
+- Crossfader with constant-power curve, master with level meter
+- **Cue/headphone bus**: pre-fader listen per channel (🎧), master and
+  headphones on separate output devices via the "🔈 Audio outputs" menu
+  ("Reveal device names" fetches the labels)
 
-**Musikquellen**
-- Wavlake Top 40 / Top 100 / Neu / Zufall / Genre-Zufall
-- Katalogsuche (Tracks, Artists, Alben)
-- Crate: gespeicherte Artists und Alben, persistiert über `storage`
-- Nostr: kind-30003-Sets werden geladen und die enthaltenen
-  Wavlake-Links zu spielbaren Tracks aufgelöst
+**Music sources**
+- Wavlake Top 40 / Top 100 / New / Random / genre random
+- Catalog search (tracks, artists, albums)
+- Crate: saved artists and albums, persisted via `storage` — plus a track
+  playlist ("+" on a track row, "+ all → playlist" above the list,
+  "Show playlist" renders it as a loadable list)
+- Local files: file picker (📁 LOCAL) and drag & drop onto a deck — always
+  FULL mode, no zap target
+- Nostr: kind-30003 sets are loaded and the Wavlake links they contain are
+  resolved to playable tracks
 
 **Value4Value**
-- Zap-Button pro Track und pro Deck
-- Setlist der Session als kind-30003-Event veröffentlichen
+- Zap button per track and per deck
+- Publish the session's setlist as a kind-30003 event
 
-## Was NIP-5D hier erzwingt
+**Design**
+- The UI follows the **600B design system** — tokens at the top of
+  `src/styles.css`, details in [HANDOFF.md](HANDOFF.md)
 
-Diese drei Einschränkungen prägen die gesamte Architektur — sie sind keine
-Designentscheidungen, sondern Vorgaben der Spec:
+## What NIP-5D forces here
 
-1. **Kein Netzwerk im Napplet.** Der Sandbox-Iframe läuft mit
-   `connect-src 'none'`; `fetch`, WebSocket und `localStorage` existieren nicht.
-   Alles läuft über `resource.bytes` — der Host holt die Bytes. Das ist hier ein
-   Glücksfall: Wavlakes Audio-CDN sendet *keine* CORS-Header, ein direkter
-   Browser-Fetch der MP3 wäre unmöglich. Der Host kennt diese Schranke nicht.
+These three constraints shape the entire architecture — they are not design
+decisions, they are requirements of the spec:
+
+1. **No network inside the napplet.** The sandboxed iframe runs with
+   `connect-src 'none'`; `fetch`, WebSocket and `localStorage` don't exist.
+   Everything goes through `resource.bytes` — the host fetches the bytes.
+   Here that's a stroke of luck: Wavlake's audio CDN sends *no* CORS headers,
+   a direct browser fetch of the MP3 would be impossible. The host has no
+   such restriction.
    → `src/lib/nap.js`
 
-2. **`img-src data: blob:`.** Ein `<img src="https://…">` lädt in der Sandbox
-   nicht. Artwork geht deshalb ebenfalls über `resource.bytes` und wird als
-   Blob-URL in den DOM gegeben (mit LRU-Cache).
+2. **`img-src data: blob:`.** An `<img src="https://…">` won't load in the
+   sandbox. Artwork therefore also goes through `resource.bytes` and is
+   handed to the DOM as a blob URL (with an LRU cache).
    → `src/lib/artwork.js`
 
-3. **Keine Signier-API, keine Payment-Domain.** Ein Napplet kann Events nur
-   *publizieren* (der Host signiert dabei), nicht bloß signieren. Und es gibt
-   keinerlei Wallet-Zugang. Ein echter NIP-57-Zap braucht aber genau das: einen
-   signierten, *nicht* publizierten kind-9734-Request. Deshalb zwei Modi:
+3. **No signing API, no payment domain.** A napplet can only *publish*
+   events (the host signs in the process), not merely sign them. And there
+   is no wallet access whatsoever. A real NIP-57 zap needs exactly that: a
+   signed, *not* published kind-9734 request. Hence two modes:
 
-   | Modus | Was passiert | Nostr-Quittung |
+   | Mode | What happens | Nostr receipt |
    |---|---|---|
-   | `lnurl` (Default) | LNURL-pay an die Lightning-Adresse aus dem Artist-Profil, Boost-Text als LNURL-Kommentar | nein |
-   | `nip57` | 9734 wird via `outbox.publish` signiert — landet dabei auch auf deinen Relays | ja (kind 9735) |
+   | `lnurl` (default) | LNURL-pay to the Lightning address from the artist profile, boost text as the LNURL comment | no |
+   | `nip57` | the 9734 is signed via `outbox.publish` — and thereby also lands on your relays | yes (kind 9735) |
 
-   Die Invoice geht danach an WebLN oder per `link.open` als `lightning:`-URI an
-   die externe Wallet.
+   The invoice then goes to WebLN or, via `link.open`, as a `lightning:` URI
+   to the external wallet.
    → `src/lib/zap.js`
 
-## Audio-Backends
+## Audio backends
 
-Zwei Pfade hinter einer Deck-API (`src/audio/engine.js`):
+Two paths behind one deck API (`src/audio/engine.js`):
 
-| Backend | Voraussetzung | Kann |
+| Backend | Prerequisite | Can do |
 |---|---|---|
-| `buffer` (**FULL**) | Rohbytes verfügbar → `decodeAudioData` | EQ, Filter, FX, Scratch, Waveform, BPM, samplegenaues Cue, VU |
-| `element` (**BASIC**) | nur `<audio>`-Streaming | Crossfade über Lautstärke, Tempo über `playbackRate` |
+| `buffer` (**FULL**) | raw bytes available → `decodeAudioData` | EQ, filter, FX, scratch, waveform, BPM, sample-accurate cue, VU |
+| `element` (**BASIC**) | `<audio>` streaming only | crossfade via volume, tempo via `playbackRate` |
 
-Im Napplet ist FULL der Normalfall (`resource.bytes`). Standalone ohne Proxy
-bleibt nur BASIC — das Badge am Deck zeigt an, welcher Pfad aktiv ist.
+Inside the napplet, FULL is the normal case (`resource.bytes`). Standalone
+without a proxy, only BASIC remains — the badge on the deck shows which path
+is active.
 
-Kein Timestretch: Pitch und Tempo hängen zusammen, wie bei Vinyl. Der
-`playbackRate` der Web Audio API kann nichts anderes.
+No timestretch: pitch and tempo are coupled, like on vinyl. The Web Audio
+API's `playbackRate` can't do anything else.
 
-### Wie das Scratchen funktioniert
+### How scratching works
 
-Ein `AudioBufferSourceNode` läuft nur vorwärts — `playbackRate` darf nicht
-negativ werden. Deshalb hat jedes Deck zwei Transport-Modi:
+An `AudioBufferSourceNode` only runs forwards — `playbackRate` must not go
+negative. That's why every deck has two transport modes:
 
-| Modus | Wer spielt | Wofür |
+| Mode | Who plays | For what |
 |---|---|---|
-| `source` | ein langer `AudioBufferSourceNode` | normaler Betrieb, artefaktfrei |
-| `platter` | granularer *Turntable* (`src/audio/scratch.js`) | Scratch, Brake, Spin-up, Backspin |
+| `source` | one long `AudioBufferSourceNode` | normal operation, artifact-free |
+| `platter` | granular *turntable* (`src/audio/scratch.js`) | scratch, brake, spin-up, backspin |
 
-Der Turntable schedult 22-ms-Körner mit kurzen Rampen an den Nahtstellen (ohne
-die klickt es hörbar) und liest bei negativer Rate aus einer **vorab
-umgedrehten Kopie** des Buffers. Die wird erst *nach* dem Dekodieren gebaut, um
-den Ladeweg nicht zu blockieren.
+The turntable schedules 22 ms grains with short ramps at the seams (without
+them it clicks audibly) and, at negative rates, reads from a **pre-reversed
+copy** of the buffer. That copy is built only *after* decoding, so it doesn't
+block the load path.
 
-Wichtig für die Haptik: solange die Hand auf der Platte liegt, gehört die
-Position der Hand (`autoAdvance = false`) — sonst würden Zeiger *und*
-Grain-Scheduler beide vorschieben und jede Geste doppelt zählen. Beim Loslassen
-übernimmt der Motor, zieht die Rate auf Nennwert und übergibt zurück an
-`source`.
+Important for the feel: while a hand is on the record, the position belongs
+to the hand (`autoAdvance = false`) — otherwise pointer *and* grain scheduler
+would both push it forward and every gesture would count double. On release
+the motor takes over, pulls the rate to nominal and hands back to `source`.
 
 ## Setup
 
 ```bash
 npm install
-npm run dev        # Vite auf :5173 — Standalone, BASIC-Modus
+npm run dev        # Vite on :5173 — standalone, BASIC mode
 npm run build      # dist/index.html (single-file) + dist/.nip5a-manifest.json
-npm run shell      # Build + Dev-Host-Shell auf :5178  ← so testen
+npm run shell      # build + dev host shell on :5178  ← test it this way
 ```
 
-`npm run shell` startet eine minimale NIP-5D-Shell (`dev/`), die das Napplet
-über `srcdoc` mit `sandbox="allow-scripts"` lädt, den offiziellen
-`@napplet/shim`-Prelude injiziert und die Domains `resource`, `identity`,
-`storage`, `outbox`, `relay`, `common`, `link` bedient. Der eingebaute
-Server-Proxy erlaubt echte `resource.bytes`-Fetches gegen Wavlake — dadurch
-lässt sich der FULL-Pfad lokal wirklich testen.
+`npm run shell` starts a minimal NIP-5D shell (`dev/`) that loads the napplet
+via `srcdoc` with `sandbox="allow-scripts"`, injects the official
+`@napplet/shim` prelude and serves the `resource`, `identity`, `storage`,
+`outbox`, `relay`, `common`, `link` domains. The built-in server proxy allows
+real `resource.bytes` fetches against Wavlake — which makes the FULL path
+actually testable locally.
 
 ```bash
-node dev/smoke.mjs   # End-to-End-Test im echten Sandbox-Iframe (Playwright)
+node dev/smoke.mjs           # end-to-end in the real sandboxed iframe (Playwright)
+node dev/fx-sync-check.mjs   # FX rack, SYNC latch, loops, DROP
+node dev/local-check.mjs     # local file playback
+node dev/playlist-check.mjs  # playlist / crate
 ```
 
-Der Test lädt Charts, wirft je einen Track auf beide Decks, prüft Dekodierung,
-Waveform, BPM, Transport, Crossfader, EQ, SYNC, Nostr-Playlist-Auflösung und
-Suche, und schreibt Screenshots nach `/tmp/clanker-*.png`.
+Four Playwright E2E suites, 96 checks in total. The smoke test loads charts,
+throws a track onto each deck, checks decoding, waveform, BPM, transport,
+crossfader, EQ, SYNC, Nostr playlist resolution and search, and writes
+screenshots to `/tmp/clanker-*.png`.
 
 ## Deployment
 
-`npm run build` erzeugt `dist/.nip5a-manifest.json` — ein kind-35129-Event mit
-`d`-Tag, `path`-Hash, Aggregat-Hash und den `requires`-Tags. Für die
-Veröffentlichung (Blossom-Upload + Relay-Publish):
+`npm run build` produces `dist/.nip5a-manifest.json` — a kind-35129 event
+with `d` tag, `path` hash, aggregate hash and the `requires` tags. To publish
+(Blossom upload + relay publish):
 
 ```bash
 napplet init --name dj-david-clanker --relay wss://… --server https://…
@@ -182,81 +208,87 @@ napplet deploy --dry-run
 napplet deploy
 ```
 
-## Projektstruktur
+## Project structure
 
 ```
-index.html              Napplet-Entry
-vite.config.js          nip5aManifest(), single-file Artifact
+index.html              napplet entry
+vite.config.js          nip5aManifest(), single-file artifact
 src/
-  main.js               Verdrahtung, Tastenkürzel, Settings, Setlist
+  main.js               wiring, keyboard shortcuts, settings, setlist
   styles.css
   lib/
-    nap.js              NIP-5D-Bridge + Standalone-Fallbacks
-    artwork.js          Bilder über resource.bytes → blob:
-    wavlake.js          catalog.wavlake.com Client
-    nostr.js            kind-30003 lesen / Setlist publizieren
-    zap.js              LNURL-pay bzw. NIP-57
+    nap.js              NIP-5D bridge + standalone fallbacks
+    artwork.js          images via resource.bytes → blob:
+    wavlake.js          catalog.wavlake.com client
+    nostr.js            read kind-30003 / publish setlist
+    zap.js              LNURL-pay or NIP-57
     bech32.js           npub ↔ hex
   audio/
-    engine.js           Mixer + Deck, zwei Backends, Platter-Physik
-    scratch.js          Granularer Turntable + umgedrehter Buffer
-    fx.js               Flanger, tempo-synchroner Gater
-    automix.js          Auto-DJ-Zustandsmaschine
-    analyze.js          Waveform-Peaks, RMS, BPM-Schätzung
+    engine.js           mixer + deck, two backends, platter physics
+    scratch.js          granular turntable + reversed buffer
+    fx.js               5 insert FX: flanger, phaser, gater, echo, reverb
+    automix.js          auto-DJ state machine
+    analyze.js          waveform peaks, RMS, BPM estimation
   ui/
-    platter.js          Canvas-Scheibe: Cover-Label, Rillen, Wellen-Ring
-    scope.js            Live-Soundwellen (mirror / wave / bars)
-    deck, mixer, browser, modal, zapmodal, dom
+    platter.js          canvas disc: cover label, grooves, waveform ring
+    scope.js            live scopes (mirror / wave / bars)
+    deck, mixer, automixbar, browser, modal, zapmodal, dom
 dev/
-  shell.html            Minimale NIP-5D-Host-Shell
-  serve-shell.mjs       Statischer Server + Fetch-Proxy
-  smoke.mjs             Playwright-E2E
+  shell.html            minimal NIP-5D host shell
+  serve-shell.mjs       static server + fetch proxy
+  smoke.mjs             Playwright E2E
+  fx-sync-check.mjs     E2E: FX, SYNC latch, loops, DROP
+  local-check.mjs       E2E: local files
+  playlist-check.mjs    E2E: playlist
 ```
 
-## Tastenkürzel
+## Keyboard shortcuts
 
-| Taste | Funktion |
+| Key | Function |
 |---|---|
-| `Q` / `P` | Deck A / B Play-Pause |
-| `W` / `O` | Deck A / B Cue |
-| `X` | Automix an / aus |
-| `N` | Automix: jetzt überblenden |
-| `S` / `L` | Deck A / B Rewind — halten, wird schneller |
-| `V` / `B` | Deck A / B zwischen VINYL und CDJ |
-| `F` / `G` | Deck A Flanger / Gater |
-| `H` / `J` | Deck B Flanger / Gater |
-| `,` / `.` | Crossfader links / rechts |
-| `M` | Crossfader mittig |
-| `1` / `2` | Deck A / B synchronisieren (BPM + Beat-Phase) |
-| `←` / `→` | Deck A ±5 s (mit `Alt`: Deck B) |
+| `Q` / `P` | Deck A / B play-pause |
+| `W` / `O` | Deck A / B cue |
+| `E` / `I` | Deck A / B headphone cue (pre-fader) |
+| `X` | Automix on / off |
+| `N` | Automix: crossfade now |
+| `S` / `L` | Deck A / B rewind — hold and it speeds up |
+| `V` / `B` | Deck A / B between VINYL and CDJ |
+| `F` / `G` | Deck A FX slot 1 / 2 |
+| `H` / `J` | Deck B FX slot 1 / 2 |
+| `3` / `4` | DROP Deck A / B on the other deck's next bar-1 |
+| `,` / `.` | crossfader left / right |
+| `M` | crossfader centered |
+| `1` / `2` | sync Deck A / B (BPM + beat phase) |
+| `←` / `→` | Deck A ±5 s (with `Alt`: Deck B) |
 
-Für Architektur, Designentscheidungen, Testabdeckung und offene Punkte siehe
+For architecture, design decisions, test coverage and open items, see
 **[HANDOFF.md](HANDOFF.md)**.
 
-## Bekannte Grenzen
+## Known limits
 
-- **Kein Keylock.** Tempoänderung verschiebt die Tonhöhe.
-- **Scratch-Latenz** liegt bei rund 45 ms — so weit im Voraus muss die
-  Grain-Queue gefüllt sein, damit nichts aussetzt. Für Baby-Scratches und
-  Transformer reicht das; für Turntablism auf Wettkampfniveau nicht.
-- **Der umgedrehte Buffer kostet Speicher**: nochmal so viel wie das Original,
-  bei einem 6-Minuten-Stereotrack also grob 60 MB pro Deck.
-- **Vinyl-Features brauchen den FULL-Modus.** Im BASIC-Modus sind Scratch,
-  Brake, Rewind und FX deaktiviert — die Samples liegen dort nicht vor.
-- **BPM-Erkennung** ist eine Peak-Intervall-Schätzung im Tiefband. Bei
-  4/4-Material zuverlässig, bei freiem Rhythmus nicht. Gestrichelter Rahmen im
-  BPM-Feld heißt „niedrige Konfidenz"; der Wert ist überschreibbar.
-- **Ganze Datei wird geladen**, bevor ein Deck spielt (`resource.bytes` liefert
-  laut Spec einen einzelnen Blob, kein Streaming). 4–6 MB pro Track.
-- **Wavlakes Lightning-Adressen** sind nicht über die Katalog-API auffindbar.
-  Der Zap geht an die `lud16` aus dem Nostr-Profil des Artists; fehlt sie,
-  bietet der Dialog den Boost auf wavlake.com an.
-- **NIP-5D ist ein offener PR**, die `@napplet/*`-Pakete stehen bei 0.x. Die
-  Wire-Shapes hier stammen aus den ausgelieferten Type-Definitionen und können
-  driften. Versionen pinnen.
+- **No keylock.** Changing the tempo shifts the pitch.
+- **Scratch latency** sits around 45 ms — the grain queue has to be filled
+  that far ahead so nothing drops out. Enough for baby scratches and
+  transformer work; not for competition-level turntablism.
+- **The reversed buffer costs memory**: as much again as the original — for
+  a 6-minute stereo track roughly 60 MB per deck.
+- **Vinyl features need FULL mode.** In BASIC mode scratch, brake, rewind
+  and FX are disabled — the samples simply aren't there.
+- **BPM detection** (v2, comb autocorrelation) nails the period, but the
+  metrical level is a choice — on shuffle material half/double and 2:3
+  levels compete. A dashed frame on the BPM field means "low confidence";
+  the value stays editable.
+- **The whole file is loaded** before a deck plays (`resource.bytes` returns
+  a single blob per spec, no streaming). 4–6 MB per track.
+- **Wavlake's Lightning addresses** aren't discoverable via the catalog API.
+  The zap goes to the `lud16` from the artist's Nostr profile; if that's
+  missing, the dialog offers the boost on wavlake.com.
+- **NIP-5D is an open PR**, the `@napplet/*` packages sit at 0.x. The wire
+  shapes here come from the shipped type definitions and can drift. Pin
+  versions.
 
-## Quellen
+## Sources
 
 - [NIP-5D (PR #2303)](https://github.com/nostr-protocol/nips/pull/2303) · [napplet.run](https://napplet.run/docs/)
-- [Wavlake](https://wavlake.com) · `https://catalog.wavlake.com/v1` (öffentlich, ohne Key)
+- [Wavlake](https://wavlake.com) · `https://catalog.wavlake.com/v1` (public, no key)
 - [NIP-51 Sets](https://github.com/nostr-protocol/nips/blob/master/51.md) · [NIP-57 Zaps](https://github.com/nostr-protocol/nips/blob/master/57.md)
