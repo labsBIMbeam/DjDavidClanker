@@ -91,6 +91,19 @@ const playing = await frame.evaluate(() => ({
 check('local file plays with signal', playing.pos > 0.5 && playing.level > 0.005,
   `t=${playing.pos.toFixed(1)}s master=${playing.level.toFixed(3)}`);
 
+// The session-local list accumulates: a second pick joins the first.
+await frame.locator('input.local-input').setInputFiles({
+  name: 'Second Artist - Another Beat.wav',
+  mimeType: 'audio/wav',
+  buffer: makeWav(2),
+});
+await frame.locator('.browser-h2', { hasText: '2 this session' }).waitFor({ timeout: 10000 });
+const localRows = await frame.locator('.track-row').count();
+check('local file list accumulates across picks', localRows === 2, `${localRows} rows`);
+await frame.locator('.tab').nth(2).click();
+const localChips = await frame.locator('.side-group .chip', { hasText: '📁' }).count();
+check('crate tab lists the session local files', localChips === 2, `${localChips} chips`);
+
 await page.screenshot({ path: `${OUT}-deck.png`, fullPage: true });
 await browser.close();
 

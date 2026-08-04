@@ -544,6 +544,8 @@ export class Deck extends Emitter {
    */
   setLoopBeats(beats) {
     if (this.backend !== 'buffer' || !this.bpm) return;
+    // Second press on the same length toggles the loop off.
+    if (this.loop.active && this.loop.beats === beats) return this.exitLoop();
     const beatLen = 60 / this.bpm;
     const pos = this.position;
     const start = Number.isFinite(this.beatOffset)
@@ -1147,7 +1149,14 @@ export class Deck extends Emitter {
 
   _applyMix() {
     const level = this.volume * this.trim;
-    if (this._graph) this._graph.gain.gain.value = level;
+    if (this._graph) {
+      // Automation-safe: auto-scratch gates this param with setTargetAtTime,
+      // and a plain .value assignment would lose against a pending target.
+      const g = this._graph.gain.gain;
+      const t = this.mixer.ctx.currentTime;
+      g.cancelScheduledValues(t);
+      g.setTargetAtTime(level, t, 0.01);
+    }
     if (this._el) {
       this._el.volume = clamp(level * this.mixer.crossValue(this.id) * this.mixer.master, 0, 1);
     }
@@ -1225,7 +1234,12 @@ export class Mixer extends Emitter {
       this.cueDest = this.ctx.createMediaStreamDestination();
       this.cueGain.connect(this.cueDest);
       this.cueCtx = new Ctx({ latencyHint: 'interactive' });
-      this.cueCtx.createMediaStreamSource(this.cueDest.stream).connect(this.cueCtx.destination);
+      // The bridge stays MUTED until a distinct cue device is chosen: on the
+      // same device as the master it would play everything twice a few ms
+      // apart — comb filtering that eats the bass first.
+      this._cueOut = this.cueCtx.createGain();
+      this._cueOut.gain.value = 0;
+      this.cueCtx.createMediaStreamSource(this.cueDest.stream).connect(this._cueOut).connect(this.cueCtx.destination);
       this.cueAvailable = true;
     } catch {
       this.cueAvailable = false;
@@ -1271,10 +1285,18 @@ export class Mixer extends Emitter {
     try {
       await target.setSinkId(deviceId || '');
       this.outputs[which] = deviceId || '';
+      this._updateCueGate();
       return true;
     } catch {
       return false;
     }
+  }
+
+  /** Cue audio flows only onto a device that differs from the master. */
+  _updateCueGate() {
+    if (!this._cueOut) return;
+    const distinct = Boolean(this.outputs.cue) && this.outputs.cue !== this.outputs.master;
+    this._cueOut.gain.value = distinct ? 1 : 0;
   }
 
   /** Drive deck physics and FX scheduling. Call once per animation frame. */

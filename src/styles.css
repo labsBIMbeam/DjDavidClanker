@@ -159,6 +159,62 @@ html, body {
 
 .decks { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
+/* Battle layout: tops flank the vertical master, the crossfader runs full
+   width between tops and bottoms, channel strips split in the middle. */
+.stage {
+  display: grid;
+  grid-template-columns: 1fr minmax(200px, auto) 1fr;
+  grid-template-areas:
+    "atop mid btop"
+    "abot mbot bbot";
+  gap: 12px;
+  align-items: stretch;
+}
+.stage > .deck-top.deck-A { grid-area: atop; }
+.stage > .deck-top.deck-B { grid-area: btop; }
+.stage > .master-col { grid-area: mid; }
+.stage > .deck-bottom.deck-A { grid-area: abot; }
+.stage > .deck-bottom.deck-B { grid-area: bbot; }
+.stage > .channel-wrap { grid-area: mbot; }
+
+.master-col {
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  height: 100%;
+}
+.master-vert { display: flex; gap: 10px; align-items: stretch; justify-content: center; flex: 1; min-height: 180px; }
+input[type=range].master { height: 100%; }
+.master-col .cuevol { width: 100%; }
+.master-col .mixer-actions { flex-wrap: wrap; justify-content: center; }
+
+.xf-row {
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px 16px;
+  display: flex; align-items: center; gap: 12px;
+}
+.xf-row .crossfader { flex: 2; }
+.xf-row .cuevol { flex: 1; max-width: 160px; }
+.xf-end { font-family: var(--display); font-size: 15px; opacity: .4; transition: opacity .15s; }
+.xf-end-a { color: var(--a); }
+.xf-end-b { color: var(--b); }
+.xf-end.live { opacity: 1; text-shadow: 0 0 12px currentColor; }
+.xf-end.live::after { content: ' ●'; font-size: 9px; vertical-align: middle; }
+
+.channel-wrap { display: flex; gap: 10px; justify-content: center; height: 100%; }
+.channel-strip {
+  display: flex; flex-direction: column; gap: 8px; align-items: center;
+  min-width: 96px;
+}
+.channel-strip .deck-eq { align-items: center; }
+
+.deck-meter { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+.deck-meter .meter-canvas { flex: 1; max-width: 100%; }
+
 .deck {
   background: linear-gradient(180deg, var(--panel-2), var(--panel));
   border: 1px solid var(--line);
@@ -683,6 +739,11 @@ input[type=range].am-fade::-moz-range-thumb { width: 14px; height: 14px; border-
 
 @media (max-width: 1000px) {
   .decks { grid-template-columns: 1fr; }
+  .stage {
+    grid-template-columns: 1fr;
+    grid-template-areas: "atop" "btop" "mid" "abot" "bbot" "mbot";
+  }
+  .master-vert { min-height: 120px; }
   .mixer { grid-template-columns: 1fr; gap: 10px; }
   .browser-main { grid-template-columns: 1fr; }
   .browser-side { border-right: 0; border-bottom: 1px solid var(--line); max-height: 220px; }

@@ -88,12 +88,12 @@ src/
     automix.js          auto-DJ state machine
     analyze.js          waveform peaks, RMS, BPM v2 (comb autocorrelation + beat phase)
   ui/
-    deck.js  platter.js  scope.js  mixer.js  automixbar.js
+    deck.js  platter.js  meter.js  mixer.js  automixbar.js
     browser.js  modal.js  zapmodal.js  dom.js
 dev/
   shell.html            minimal NIP-5D host shell
   serve-shell.mjs       static server + fetch proxy
-  smoke.mjs             Playwright E2E (42 checks)
+  smoke.mjs             Playwright E2E (40 checks; three sibling suites exist)
 ```
 
 A single `requestAnimationFrame` loop in `main.js` drives everything:
@@ -178,9 +178,19 @@ Covered: boot and `window.napplet` injection, charts via `resource.bytes`,
 FULL-mode decoding, waveform, BPM (92.5 measured), scratch direction *and*
 1:1 mapping, return to `source` mode, rewind acceleration (−13.4×), vinyl
 brake, FX throughput, gater division, disc rendering and rotation, deck and
-master scopes incl. mode switching, a complete Automix cycle (cold start →
+master level meters (fire segments, red overshoot), a complete Automix cycle (cold start →
 preload → crossfade → handover), kind-30003 resolution, search, mobile
 viewport, no console errors.
+
+**Playwright pitfall #2 (iframe coordinates):** `locator.boundingBox()` on an
+element inside the sandboxed srcdoc iframe returns FRAME-relative coordinates
+here, not page coordinates — and the dev shell's log grows during a run,
+pushing the iframe down, so even a correct offset measured at boot goes stale.
+Raw `page.mouse` gestures must compute page coordinates per call: scroll the
+element to the frame-viewport center, take the iframe's own boundingBox, add
+the in-frame `getBoundingClientRect`. `smoke.mjs` has the `pageRect()` helper;
+`locator.click()` is unaffected (it targets internally). This masked itself
+for weeks because frame scroll ≈ iframe offset by coincidence.
 
 **Playwright pitfall:** `waitForFunction(fn, {timeout})` passes the object as
 an *argument* to the page function, not as an option — the 30 s default stays
@@ -349,7 +359,10 @@ Interactions with non-obvious behavior:
 | 🎧 (on the channel) | pre-fader listen on the cue bus (keys E/I) |
 | 🔈 (in the mixer) | "🔈 Audio outputs" menu: master and headphone device, applies immediately; "Reveal device names" fetches the labels via a media permission |
 | Kill buttons (HI/MID/LOW) | toggle to −26 dB and back to 0 |
-| Scope label | click cycles MIRROR → WAVE → BARS |
+| Level meters | classic segmented meters (channel horizontal under the wave, master vertical mid-stage): fire palette, red overshoot ≥ 0.9 with clip latch and peak hold. They replaced the oscilloscope scopes |
+| Beat-loop buttons | second press on the same length exits the loop |
+| Local files (crate tab) | every picked or dropped file joins a session list — reachable until reload; File handles cannot persist through the storage domain |
+| Cue bridge gate | the second AudioContext stays muted until the cue device differs from the master device — same-device output would double-play with a few ms offset and comb-filter the bass away |
 | Waveform | click jumps (within the visible window), mouse wheel or −/+ zooms ×1–×64, the ×1 label resets. Zoomed, the window follows the playhead and renders live from 8k peaks; bar-1 lines are stronger and anchored to the detected downbeat. Double-click on a track row loads into Deck A |
 | DROP (keys 3/4) | starts the deck sample-accurately on the other deck's next bar-1 — tempo synced beforehand, own entry point = cue snapped to its own 1, CDJ start without vinyl spin-up. Pressing again aborts |
 | TAP (keys T/U) | tap tempo: hit it on every beat. Uses playback-position deltas (median), so it yields the BASE bpm regardless of the tempo fader; from the 4th tap BPM + beat grid are set and marked manual. Taps give the beat, not the 1 — `barOffset` re-anchors to the tapped grid |

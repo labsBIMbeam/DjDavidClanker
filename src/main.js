@@ -38,17 +38,25 @@ const header = h('header', { class: 'app-head' },
   ),
 );
 
-const deckWrap = h('div', { class: 'decks' });
+const deckWrap = h('div', { class: 'stage' });
 const app = h('div', { class: 'app' }, header, deckWrap);
 document.body.appendChild(app);
 
 const panelA = DeckPanel(mixer.decks.A, { onZap: (d) => zapDeck(d), onEject: eject, accent: 'a' });
 const panelB = DeckPanel(mixer.decks.B, { onZap: (d) => zapDeck(d), onEject: eject, accent: 'b' });
-deckWrap.appendChild(panelA.root);
-deckWrap.appendChild(panelB.root);
-
 const strip = MixerStrip(mixer, { onPublishSet: publishCurrentSet, onSettings: showSettings, onOutputs: showOutputMenu });
-app.appendChild(strip.root);
+
+// Battle layout: deck tops and bottoms flank the full-height vertical master
+// column; both channel strips (EQ, filter, volume, cue) sit split in the
+// middle like a real 2-channel mixer. The cue/crossfader/actions bar goes
+// below the stage, right above the track browser.
+deckWrap.appendChild(panelA.top);
+deckWrap.appendChild(strip.middle);
+deckWrap.appendChild(panelB.top);
+deckWrap.appendChild(panelA.bottom);
+deckWrap.appendChild(h('div', { class: 'channel-wrap' }, panelA.channelStrip, panelB.channelStrip));
+deckWrap.appendChild(panelB.bottom);
+app.appendChild(strip.xfRow);
 
 const browser = Browser({
   onLoadDeck: loadIntoDeck,
@@ -81,23 +89,28 @@ app.appendChild(browser.root);
 const capBanner = h('div', { class: 'cap-banner' });
 app.insertBefore(capBanner, deckWrap);
 
-// Drop an audio file straight onto a deck — the fastest way to play local music.
+// Drop an audio file straight onto a deck — any of its fragments accepts it.
 for (const [id, panel] of [['A', panelA], ['B', panelB]]) {
-  const root = panel.root;
-  root.addEventListener('dragover', (e) => {
-    if (e.dataTransfer && [...e.dataTransfer.types].includes('Files')) {
+  for (const root of panel.roots) {
+    root.addEventListener('dragover', (e) => {
+      if (e.dataTransfer && [...e.dataTransfer.types].includes('Files')) {
+        e.preventDefault();
+        root.classList.add('droptarget');
+      }
+    });
+    root.addEventListener('dragleave', () => root.classList.remove('droptarget'));
+    root.addEventListener('drop', (e) => {
       e.preventDefault();
-      root.classList.add('droptarget');
-    }
-  });
-  root.addEventListener('dragleave', () => root.classList.remove('droptarget'));
-  root.addEventListener('drop', (e) => {
-    e.preventDefault();
-    root.classList.remove('droptarget');
-    const file = [...((e.dataTransfer && e.dataTransfer.files) || [])]
-      .find((f) => /^audio\//.test(f.type) || /\.(mp3|wav|flac|ogg|m4a)$/i.test(f.name));
-    if (file) loadIntoDeck(id, trackFromFile(file));
-  });
+      root.classList.remove('droptarget');
+      const file = [...((e.dataTransfer && e.dataTransfer.files) || [])]
+        .find((f) => /^audio\//.test(f.type) || /\.(mp3|wav|flac|ogg|m4a)$/i.test(f.name));
+      if (file) {
+        const track = trackFromFile(file);
+        browser.addLocalTracks([track]); // dropped files join the session list
+        loadIntoDeck(id, track);
+      }
+    });
+  }
 }
 
 /* ------------------------------ wiring ------------------------------ */
