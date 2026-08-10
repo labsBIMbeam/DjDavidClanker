@@ -26,6 +26,8 @@
 import { fetchBlob } from '../lib/nap.js';
 import { detectBpm, waveformPeaks, rms } from './analyze.js';
 import { Turntable, reversedBuffer } from './scratch.js';
+import { AutoScratch, SCRATCHES } from './autoscratch.js';
+import { detectKey, keyAtRate, compatibility } from './key.js';
 import { Flanger, Gater, Phaser, Echo, Reverb } from './fx.js';
 
 /** Insert order in the chain — modulation first, gate, then time-based tails. */
@@ -84,6 +86,7 @@ export class Deck extends Emitter {
     this.bpm = 0;
     this.bpmConfidence = 0;
     this.bpmManual = false;
+    this.key = null; // detected musical key, at the track's own speed
     this.beatOffset = null; // seconds of the first detected beat, for the grid
     this.barOffset = null; // seconds of a detected bar-1 (downbeat)
     this._drop = null; // armed quantized start: { when }
@@ -95,8 +98,6 @@ export class Deck extends Emitter {
     this.syncedTo = null; // other deck while SYNC is latched
     this._lastPhaseSeek = 0;
     this._taps = []; // tap-tempo ring: { t: wall ms, pos: track seconds }
-    this.autoScratch = null; // active auto-scratch pattern name
-    this._as = null;
 
     /* vinyl */
     this.vinylMode = true;
@@ -105,6 +106,7 @@ export class Deck extends Emitter {
     this.scratching = false; // hand is on the record
     this.rewinding = false;
     this.platterTurns = 0; // for the UI, accumulates with real rate
+    this.autoScratch = new AutoScratch(this);
 
     /* fx state mirrored for the UI */
     this.fx = {
@@ -164,6 +166,11 @@ export class Deck extends Emitter {
     const reverb = new Reverb(ctx);
 
     const gain = ctx.createGain();
+    // Autoscratch's own battle fader. It sits where a mixer's crossfader would,
+    // but per deck, so cutting a scratch in and out never fights the real
+    // crossfader or touches the other deck.
+    const scratchGate = ctx.createGain();
+    scratchGate.gain.value = 1;
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 1024;
 
@@ -173,7 +180,7 @@ export class Deck extends Emitter {
     phaser.output.connect(gater.input);
     gater.output.connect(echo.input);
     echo.output.connect(reverb.input);
-    reverb.output.connect(gain).connect(analyser);
+    reverb.output.connect(gain).connect(scratchGate).connect(analyser);
     analyser.connect(this.mixer.crossGain[this.id]);
 
     // Pre-fader listen: tap after the FX chain but before the volume fader,
@@ -183,7 +190,7 @@ export class Deck extends Emitter {
     reverb.output.connect(cueSend);
     if (this.mixer.cueBus) cueSend.connect(this.mixer.cueBus);
 
-    this._graph = { trim, low, mid, high, filter, flanger, phaser, gater, echo, reverb, gain, analyser, cueSend };
+    this._graph = { trim, low, mid, high, filter, flanger, phaser, gater, echo, reverb, gain, scratchGate, analyser, cueSend };
     this._analyseBuf = new Float32Array(analyser.fftSize);
     this._turntable = new Turntable(ctx, trim);
     this._applyMix();
@@ -208,12 +215,12 @@ export class Deck extends Emitter {
     this.bpm = 0;
     this.bpmConfidence = 0;
     this.bpmManual = false;
+    this.key = null;
     this.beatOffset = null;
     this.barOffset = null;
     this._drop = null;
     this._taps = [];
-    this.autoScratch = null;
-    this._as = null;
+    this.autoScratch.stop();
     this.loop = { active: false, start: 0, end: 0, beats: 0 };
     this.cuePoint = 0;
     this._pausedAt = 0;
@@ -350,6 +357,13 @@ export class Deck extends Emitter {
       this.barOffset = Number.isFinite(res.barOffset) ? res.barOffset : null;
       this.emit('bpm');
 
+      // Key detection is slower than BPM and nothing waits on it, so it runs
+      // after the grid is already usable.
+      const key = await detectKey(buffer);
+      if (token !== this._loadToken) return;
+      this.key = key;
+      this.emit('key');
+
       // Reversing a 6-minute stereo buffer costs ~60 MB and ~100 ms, so it is
       // built after the track is already playable, not on the critical path.
       const rev = reversedBuffer(this.mixer.ctx, buffer);
@@ -480,6 +494,7 @@ export class Deck extends Emitter {
   }
 
   stop() {
+    if (this.autoScratch) this.autoScratch.stop();
     if (this.backend === 'element') {
       if (this._el) {
         this._el.pause();
@@ -495,6 +510,9 @@ export class Deck extends Emitter {
 
   seek(seconds) {
     const t = clamp(seconds, 0, this.duration || 0);
+    // Seeking under a running routine would leave it scratching around a stale
+    // anchor, so move the anchor with the playhead instead.
+    if (this.autoScratch && this.autoScratch.running) this.autoScratch.anchor = t;
     if (this.backend === 'element') {
       if (this._el) this._el.currentTime = t;
       this.emit('transport');
@@ -671,6 +689,7 @@ export class Deck extends Emitter {
   /** Hand goes down on the record. */
   touchPlatter() {
     if (!this.canVinyl || !this.vinylMode) return false;
+    this.autoScratch.stop(); // a real hand always wins over the routine
     this.scratching = true;
     this._afterMotor = null;
     this._enterPlatter(this._mode === 'source' ? this.nominalRate : this._platterRate);
@@ -706,12 +725,43 @@ export class Deck extends Emitter {
     this.emit('scratch');
   }
 
+  /* ---------------------------- autoscratch ---------------------------- */
+
+  get autoScratching() {
+    return this.autoScratch.running;
+  }
+
+  get scratchPattern() {
+    return this.autoScratch.pattern;
+  }
+
+  /**
+   * Run a named scratch routine. Called again with the same name it stops;
+   * with a different name it changes pattern without dropping the record.
+   * @param {string} name  key from SCRATCHES
+   * @param {{humanize?: number, intensity?: number}} [opts]
+   */
+  toggleAutoScratch(name, opts) {
+    if (!this.canVinyl) return false;
+    return this.autoScratch.toggle(name, opts);
+  }
+
+  stopAutoScratch() {
+    this.autoScratch.stop();
+  }
+
+  /** Names of the available routines, for building a menu. */
+  static get scratchNames() {
+    return Object.keys(SCRATCHES);
+  }
+
   /**
    * Dynamic rewind: hold it and the backspin keeps accelerating, so a tap is a
    * short stutter back and a long press is a full-blown rewind.
    */
   startRewind() {
     if (!this.canVinyl) return;
+    this.autoScratch.stop();
     this.rewinding = true;
     this._rewindHeldFor = 0;
     this._afterMotor = null;
@@ -735,32 +785,6 @@ export class Deck extends Emitter {
    */
   tickAudio(dt) {
     const step = clamp(dt, 0, 0.1);
-
-    // Auto-scratch: the scripted hand moves the platter each frame.
-    if (this.autoScratch && this._as && this.scratching) {
-      const as = this._as;
-      const beat = 60 / (this.effectiveBpm || 120);
-      as.t += step;
-      if (as.t >= as.bars * 4 * beat) {
-        this.stopAutoScratch();
-      } else {
-        const ph = (as.t % beat) / beat;
-        let rate = 0;
-        let gate = 1;
-        switch (this.autoScratch) {
-          case 'baby': rate = Math.sin(ph * 2 * Math.PI) * 1.8; break;
-          case 'scribble': rate = Math.sin((as.t / beat) * 8 * Math.PI) * 0.9; break;
-          case 'chirp': rate = ph < 0.5 ? 2.2 : -2.2; gate = ph < 0.5 ? 1 : 0; break;
-          case 'transformer': rate = 0.9; gate = (ph * 4) % 1 < 0.5 ? 1 : 0; break;
-          case 'backspin': rate = -(2 + (as.t / (as.bars * 4 * beat)) * 10); break;
-          default: break;
-        }
-        this.movePlatter(rate * step, step);
-        if (this._graph) {
-          this._graph.gain.gain.setTargetAtTime(gate * this.volume * this.trim, this.mixer.ctx.currentTime, 0.004);
-        }
-      }
-    }
 
     if (this._mode === 'platter' && !this.scratching) {
       if (this.rewinding) {
@@ -844,6 +868,38 @@ export class Deck extends Emitter {
   /** Kept for callers using the old name. */
   setPitch(percent) {
     this.setTempo(percent);
+  }
+
+  /**
+   * Widen or narrow the pitch fader. Two tracks a long way apart in tempo
+   * simply cannot be matched inside ±8 % — the usual ±16 % and ±50 % positions
+   * exist for exactly that, and an automatic match needs to be able to reach
+   * for them rather than reporting failure.
+   */
+  setTempoRange(range) {
+    this.tempoRange = clamp(range, 1, 100);
+    this.setTempo(this.tempo); // re-clamp if the range shrank
+    this.emit('tempo');
+  }
+
+  /**
+   * Beat-match onto another deck, widening the pitch fader only as far as the
+   * match actually needs. Returns false and restores the original range when
+   * even ±50 % cannot bridge the gap, so a failed match leaves no trace.
+   *
+   * Every automatic path — the TEMPO button, automix's transitions, the
+   * performer's upkeep — goes through here, so they all reach for a wider
+   * fader in the same way instead of each quietly giving up at ±8 %.
+   */
+  matchTempoTo(other, ranges = [8, 16, 50]) {
+    if (!other || !this.bpm || !other.effectiveBpm) return false;
+    const start = this.tempoRange;
+    for (const r of ranges.filter((v) => v >= start)) {
+      if (r !== this.tempoRange) this.setTempoRange(r);
+      if (this.syncTo(other)) return true;
+    }
+    this.setTempoRange(start);
+    return false;
   }
 
   setNudge(amount) {
@@ -934,37 +990,18 @@ export class Deck extends Emitter {
     return { count: n, bpm: n >= 4 ? this.bpm : 0 };
   }
 
-  /* ---------------------------- auto-scratch ---------------------------- */
-
   /**
-   * Scripted turntablism: beat-synced hand gestures over the granular
-   * platter, driven from tickAudio (no timers of its own). Volume gating for
-   * chirp/transformer cuts the deck channel, not the crossfader.
+   * The key this deck is actually sounding at. The decks pitch-shift by
+   * resampling, so a track pulled 6 % faster to beat-match is also sounding
+   * roughly a semitone sharp — the detected key is not the heard key.
    */
-  toggleAutoScratch(pattern) {
-    if (this.autoScratch === pattern) return this.stopAutoScratch();
-    return this.startAutoScratch(pattern);
+  get soundingKey() {
+    return this.key ? keyAtRate(this.key, this.nominalRate) : null;
   }
 
-  startAutoScratch(pattern) {
-    if (!this.canVinyl || !this._reverse || !this.bpm) return false;
-    this.stopAutoScratch();
-    this.touchPlatter();
-    this.autoScratch = pattern;
-    this._as = { t: 0, bars: pattern === 'backspin' ? 1 : 2 };
-    this.emit('scratch');
-    return true;
-  }
-
-  stopAutoScratch() {
-    if (!this.autoScratch) return;
-    this.autoScratch = null;
-    this._as = null;
-    if (this._graph) {
-      this._graph.gain.gain.setTargetAtTime(this.volume * this.trim, this.mixer.ctx.currentTime, 0.01);
-    }
-    this.releasePlatter();
-    this.emit('scratch');
+  /** How this deck's sounding key sits against another's. */
+  harmonyWith(other) {
+    return compatibility(this.soundingKey, other && other.soundingKey);
   }
 
   /** Latch or release SYNC. While latched, tickAudio keeps the phase locked. */
@@ -1176,6 +1213,7 @@ export class Deck extends Emitter {
 
   dispose() {
     this._loadToken++;
+    if (this.autoScratch) this.autoScratch.stop();
     this._stopSource();
     if (this._turntable) this._turntable.stop();
     if (this._el) {

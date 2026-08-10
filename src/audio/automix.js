@@ -33,6 +33,14 @@ export class Automix {
     this.syncTempo = true;
     this.shuffle = false;
 
+    /**
+     * Normally exactly one deck is live and a second running deck is stopped,
+     * because two uncoordinated tracks is just a mess. The performer sets this
+     * while it is deliberately blending both decks together, which is the one
+     * case where two decks playing at once is the intent rather than a fault.
+     */
+    this.allowBoth = false;
+
     /** How early to start loading the next track. Decoding an mp3 is slow. */
     this.preloadLead = 35;
 
@@ -47,12 +55,13 @@ export class Automix {
     this.lastError = '';
 
     /**
-     * The deck that just handed over. It still holds its played-out track at
-     * status 'ready', which is indistinguishable from a deck a human cued on
-     * purpose — and the preload below deliberately keeps those. Without this
-     * marker the mix ping-pongs between the same two tracks forever.
+     * Decks holding a track that has already been played out. A deck coming off
+     * a transition still has its finished track loaded and `status === 'ready'`
+     * with the playhead at the end, which looks exactly like a staged next
+     * track — so without this the stager skips it, the mix fades back into a
+     * deck parked on the last sample, and nothing comes out.
      */
-    this.staleId = null;
+    this._spent = new Set();
   }
 
   /* ------------------------------ queue ------------------------------ */
@@ -112,7 +121,7 @@ export class Automix {
       this.liveId = pick.id;
       this.mixer.setCrossfader(pick.id === 'A' ? -1 : 1);
       this.onCrossfade(this.mixer.crossfader);
-      for (const d of running) if (d.id !== pick.id) d.pause();
+      if (!this.allowBoth) for (const d of running) if (d.id !== pick.id) d.pause();
       if (pick.track) {
         this.history.push(pick.track);
         this.onTrack(pick.track);
@@ -125,6 +134,7 @@ export class Automix {
     if (!this.enabled) return;
     this.enabled = false;
     this.fade = null;
+    this._coldStart = false;
     this.onStatus('off');
   }
 
@@ -163,10 +173,28 @@ export class Automix {
 
   /* ------------------------------ engine ------------------------------ */
 
+  /**
+   * Pull the idle deck onto the live deck's tempo and phase.
+   *
+   * BPM detection finishes asynchronously after the decode, so at the moment a
+   * track is staged its `bpm` is usually still 0. Sync is therefore attempted
+   * repeatedly — on load, at the top of the fade, and on every fade tick —
+   * until it takes, rather than once at a moment the answer may not exist yet.
+   */
+  _ensureSync(live, idle) {
+    if (!this.syncTempo || !live || !idle) return false;
+    if (!idle.bpm || !live.effectiveBpm) return false;
+    if (idle.syncedTo === live.id) return true;
+    // matchTempoTo, not syncTo: a pair further apart than ±8% is common and
+    // must widen the fader rather than silently leaving the decks unmatched.
+    if (!idle.matchTempoTo(live)) return false;
+    return true;
+  }
+
   async _loadInto(deck, track) {
     this.busy = true;
     this.pending = track;
-    if (this.staleId === deck.id) this.staleId = null; // it's being refilled
+    this._spent.delete(deck.id);
     this.onStatus('loading');
     try {
       await deck.load(track);
@@ -186,7 +214,10 @@ export class Automix {
   }
 
   _beginFade(live, idle, dur) {
-    if (this.syncTempo && idle.bpm && live.effectiveBpm) idle.syncTo(live);
+    this._ensureSync(live, idle);
+    // A deck coming off a transition sits at the end of its track. Playing it
+    // from there is silence, so rewind to the cue before the fader opens.
+    if (idle.position >= idle.duration - 0.25) idle.seek(idle.cuePoint || 0);
     if (!idle.playing) idle.play();
     this.fade = {
       t: 0,
@@ -202,7 +233,7 @@ export class Automix {
     this.onCrossfade(this.fade.to);
     this.fade = null;
     live.pause();
-    this.staleId = live.id; // played out — free to be refilled
+    this._spent.add(live.id); // its track is done; it needs a fresh one staged
     this.liveId = idle.id;
     if (idle.track) {
       this.history.push(idle.track);
@@ -216,16 +247,24 @@ export class Automix {
     if (!this.enabled || this.busy) return;
     const decks = this.mixer.decks;
 
-    // Cold start: nothing is live yet. Prefer an empty deck so a track a
-    // human cued by hand survives; fall back to A when both are occupied.
+    // Cold start: nothing is live yet.
     if (!this.liveId) {
-      const free = !decks.A.track ? decks.A : (!decks.B.track ? decks.B : decks.A);
+      // `busy` is cleared when the load finishes, but `liveId` is not set until
+      // the continuation runs a microtask later. A tick landing in that gap
+      // used to start a second cold start, which put a track on each deck and
+      // played both at once.
+      if (this._coldStart) return;
+      // Prefer a deck that is genuinely free; B is the fallback so a track the
+      // user already has cued on A is not clobbered on the way in.
+      const free = !decks.A.track || decks.A.status !== 'ready' ? decks.A : decks.B;
       const track = this._takeNext();
       if (!track) {
         this.onStatus('empty');
         return;
       }
+      this._coldStart = true;
       this._loadInto(free, track).then(() => {
+        this._coldStart = false;
         if (!this.enabled || free.status !== 'ready') return;
         this.mixer.setCrossfader(free.id === 'A' ? -1 : 1);
         this.onCrossfade(this.mixer.crossfader);
@@ -248,6 +287,7 @@ export class Automix {
       const v = this.fade.from + (this.fade.to - this.fade.from) * k;
       this.mixer.setCrossfader(v);
       this.onCrossfade(v);
+      this._ensureSync(idle, live) || this._ensureSync(live, idle);
       if (k >= 1) this._finishFade(live, idle);
       return;
     }
@@ -268,23 +308,37 @@ export class Automix {
 
     // A second deck left running would block every transition, so it gets
     // stopped rather than skipped over — silently stalling is the worse bug.
-    if (idle.playing) {
+    // Unless a blend is deliberately in progress, in which case both playing
+    // is the point and the transition below copes with it.
+    if (idle.playing && !this.allowBoth) {
       idle.pause();
       return;
     }
 
     // Stage the next track early: fetching and decoding takes real seconds.
-    // A track someone already cued on the idle deck is kept and played next —
-    // unless this deck is the one that just handed over, whose track has
-    // already been played (see `staleId`).
-    const stale = this.staleId === idle.id;
-    if (!this.busy && left < this.preloadLead && (stale || !idle.track || idle.status !== 'ready')) {
+    // A track someone already cued on the idle deck is kept and played next,
+    // but one this mix has already played out is not — that is a spent deck.
+    const needsTrack = !idle.track || idle.status !== 'ready' || this._spent.has(idle.id);
+    if (!this.busy && left < this.preloadLead && needsTrack) {
       const track = this._takeNext();
-      if (track && (stale || !idle.track || idle.track.id !== track.id)) this._loadInto(idle, track);
+      if (!track) return;
+      // Only advance past a track once it is actually going somewhere;
+      // dropping it here would silently eat an entry from the queue.
+      if (idle.track && idle.track.id === track.id && !this._spent.has(idle.id)) {
+        this._spent.delete(idle.id);
+        return;
+      }
+      this._loadInto(idle, track);
       return;
     }
 
-    if (idle.status === 'ready' && !idle.playing && !stale && left <= this.fadeSeconds) {
+    // Keep pulling the staged deck onto tempo while it waits — BPM detection
+    // usually lands well after the load, and by fade time it must be right.
+    this._ensureSync(live, idle);
+
+    // `idle.playing` is deliberately not required: during a blend the next deck
+    // is already running, and the transition still has to happen on time.
+    if (idle.status === 'ready' && !this._spent.has(idle.id) && left <= this.fadeSeconds) {
       // Never fade longer than what is actually left, or the outro runs out
       // from under the transition.
       this._beginFade(live, idle, Math.min(this.fadeSeconds, Math.max(1.5, left)));

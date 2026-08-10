@@ -333,6 +333,66 @@ input[type=range].fader-v.master { height: auto; align-self: stretch; }
 .btn-vinyl { font-family: var(--mono); letter-spacing: .1em; }
 .btn-vinyl.on { border-color: color-mix(in srgb, var(--a) 50%, var(--line)); color: var(--a); }
 
+.head-mix { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.btn-match { font-family: var(--mono); letter-spacing: .06em; white-space: nowrap; }
+.match-info {
+  font-family: var(--mono); font-size: 11px; color: var(--muted);
+  white-space: nowrap; letter-spacing: .02em;
+}
+.match-info.ok { color: var(--a); }
+.deck-key {
+  font-family: var(--mono); font-size: 11px; color: var(--muted);
+  letter-spacing: .04em;
+}
+.deck-key.ok { color: var(--a); }
+
+.btn-playboth {
+  font-family: var(--mono); font-size: 13px; letter-spacing: .1em;
+  padding: 8px 18px; white-space: nowrap;
+  border-color: color-mix(in srgb, var(--a) 55%, var(--line));
+  color: var(--a);
+}
+.btn-playboth:hover { background: color-mix(in srgb, var(--a) 16%, transparent); }
+.btn-playboth.on {
+  background: color-mix(in srgb, var(--a) 22%, transparent);
+  animation: playboth-pulse .9s ease-in-out infinite;
+}
+@keyframes playboth-pulse {
+  50% { background: color-mix(in srgb, var(--a) 40%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn-playboth.on { animation: none; }
+}
+
+/* ---------------------------- autoscratch ---------------------------- */
+
+.scratch-box {
+  display: flex; flex-direction: column; gap: 4px;
+  width: 100%; max-width: 210px;
+}
+.scratch-row { display: flex; align-items: center; gap: 5px; }
+.scratch-row .fader { flex: 1; min-width: 0; }
+.btn-autoscratch { font-family: var(--mono); letter-spacing: .08em; white-space: nowrap; }
+.btn-autoscratch.on {
+  border-color: color-mix(in srgb, var(--a) 60%, var(--line));
+  color: var(--a);
+  animation: scratch-pulse 1.1s ease-in-out infinite;
+}
+@keyframes scratch-pulse {
+  50% { background: color-mix(in srgb, var(--a) 14%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn-autoscratch.on { animation: none; background: color-mix(in srgb, var(--a) 12%, transparent); }
+}
+.scratch-pick {
+  flex: 1; min-width: 0;
+  background: #171310; color: var(--fg);
+  border: 1px solid var(--line); border-radius: 0;
+  font-family: var(--mono); font-size: 11px; padding: 3px 4px;
+}
+.scratch-pick:disabled { opacity: .45; }
+.scratch-row .pitch-val { font-size: 10px; min-width: 30px; text-align: right; }
+
 /* ------------------------------- deck FX ------------------------------- */
 
 .deck-fx { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -509,8 +569,6 @@ input[type=range].pitch::-moz-range-thumb { background: linear-gradient(180deg, 
 .mixer-actions { display: flex; gap: 6px; }
 .mixer-cue { display: flex; flex-direction: column; gap: 4px; }
 .loop-row { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; justify-content: center; }
-.scratch-row { display: flex; gap: 3px; flex-wrap: wrap; justify-content: center; }
-.btn-scratch.on { border-color: var(--zap); color: var(--zap); animation: droppulse .9s ease-in-out infinite; }
 .btn-tap.on { border-color: var(--a); color: var(--a); }
 .loop-row .lbl-sub { margin-right: 2px; }
 .loop-sep { flex: 0 0 6px; }

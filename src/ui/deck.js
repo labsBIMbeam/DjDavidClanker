@@ -1,6 +1,7 @@
 import { h, clear, fmtTime, fader } from './dom.js';
 import { setImage } from '../lib/artwork.js';
 import { SEC_PER_REV, FX_TYPES } from '../audio/engine.js';
+import { SCRATCHES, scratchFamilies } from '../audio/autoscratch.js';
 import { Platter } from './platter.js';
 import { LevelMeter } from './meter.js';
 
@@ -79,21 +80,6 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
   const platter = record.root;
   const jogHint = h('div', { class: 'jog-hint' }, 'VINYL');
 
-  const SCRATCH_PATTERNS = [
-    ['BABY', 'baby'],
-    ['SCRB', 'scribble'],
-    ['CHRP', 'chirp'],
-    ['TRNS', 'transformer'],
-    ['BSPN', 'backspin'],
-  ];
-  const scratchBtns = SCRATCH_PATTERNS.map(([label, id]) =>
-    h('button', {
-      class: 'btn btn-mini btn-scratch',
-      title: `Auto-scratch: ${id} (beat-synced, runs a couple of bars)`,
-      onclick: () => deck.toggleAutoScratch(id),
-    }, label));
-  const scratchRow = h('div', { class: 'scratch-row' }, ...scratchBtns);
-
   // Classic channel meter under the wave — level with red overshoot,
   // replacing the old oscilloscope view.
   const meter = LevelMeter(() => deck.level(), { orient: 'h', length: 560, thickness: 14 });
@@ -116,6 +102,45 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
       deck.emit('mode');
     },
   }, 'VINYL');
+
+  /* --------------------------- autoscratch --------------------------- */
+
+  const scratchPick = h('select', {
+    class: 'scratch-pick',
+    'aria-label': `Scratch routine deck ${deck.id}`,
+    title: 'Which scratch the routine performs',
+    onchange: (e) => {
+      const name = e.target.value;
+      scratchPick.title = SCRATCHES[name] ? SCRATCHES[name].blurb : '';
+      if (deck.autoScratching) deck.autoScratch.pattern = name;
+      deck.emit('autoscratch');
+    },
+  });
+  for (const [family, list] of scratchFamilies()) {
+    const group = h('optgroup', { label: family });
+    for (const s of list) group.appendChild(h('option', { value: s.key }, s.label));
+    scratchPick.appendChild(group);
+  }
+  scratchPick.value = deck.scratchPattern;
+  scratchPick.title = SCRATCHES[deck.scratchPattern].blurb;
+
+  const btnScratch = h('button', {
+    class: 'btn btn-mini btn-autoscratch',
+    title: 'Run the selected scratch routine on the deck\'s BPM, anchored at the cue point',
+    onclick: () => deck.toggleAutoScratch(scratchPick.value),
+  }, 'AUTO ✳');
+
+  // Humanise: 0 is a metronome, 1 is a DJ who has had a few. The clicks and
+  // motion both get jittered — a crab with this at zero sounds like a fax.
+  const humanVal = h('span', { class: 'pitch-val' }, '35%');
+  const humanFader = fader({
+    min: 0, max: 1, step: 0.01, value: 0.35, orient: 'h', label: `Humanise deck ${deck.id}`,
+    className: 'scratch-human',
+    onInput: (v) => {
+      deck.autoScratch.humanize = v;
+      humanVal.textContent = `${Math.round(v * 100)}%`;
+    },
+  });
 
   const bpmField = h('input', {
     class: 'bpm-input',
@@ -140,6 +165,9 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
     title: 'Tap tempo: hit this on every beat — from the 4th tap BPM and beat grid are set for the whole track',
     onclick: () => deck.tapBeat(),
   }, 'TAP');
+  // Sounding key, not detected key: these decks pitch-shift by resampling, so
+  // a track pulled off-speed to beat-match is sounding in a different key.
+  const keyLabel = h('span', { class: 'deck-key', title: 'Detected musical key at the current tempo (Camelot)' }, '');
   const btnSync = h('button', { class: 'btn btn-sync', title: 'Latch tempo and beat phase onto the other deck' }, 'SYNC');
   const btnDrop = h('button', {
     class: 'btn btn-mini btn-drop',
@@ -426,12 +454,16 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
         h('div', { class: 'transport' }, btnRew, btnCue, btnPlay),
         loopRow,
         btnVinyl,
-        scratchRow,
+        h('div', { class: 'scratch-box' },
+          h('div', { class: 'scratch-row' }, btnScratch, scratchPick),
+          h('div', { class: 'scratch-row' },
+            h('span', { class: 'lbl-sub' }, 'HUMAN'), humanFader, humanVal),
+        ),
       ),
       h('div', { class: 'deck-tempo' },
         h('div', { class: 'bpm-box' },
           h('label', { class: 'lbl' }, 'BPM'),
-          h('div', { class: 'bpm-live-wrap', title: 'Effective BPM — follows the tempo fader' }, bpmLive),
+          h('div', { class: 'bpm-live-wrap', title: 'Effective BPM — follows the tempo fader' }, bpmLive, keyLabel),
           h('div', { class: 'bpm-base-row' }, h('span', { class: 'lbl-sub' }, 'BASE'), bpmField, btnTap),
         ),
         btnSync,
@@ -666,6 +698,19 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
     btnVinyl.textContent = deck.vinylMode ? 'VINYL' : 'CDJ';
     btnVinyl.classList.toggle('on', deck.vinylMode);
     btnVinyl.disabled = !deck.canVinyl;
+
+    const sounding = deck.soundingKey;
+    const other = deck.mixer.decks[deck.id === 'A' ? 'B' : 'A'];
+    keyLabel.textContent = sounding ? sounding.camelot : '';
+    keyLabel.title = sounding
+      ? `${sounding.name} (${sounding.camelot}) at this tempo`
+      : 'Key not detected';
+    keyLabel.classList.toggle('ok', Boolean(sounding && other.soundingKey && deck.harmonyWith(other).ok));
+
+    btnScratch.classList.toggle('on', deck.autoScratching);
+    btnScratch.disabled = !deck.canVinyl;
+    scratchPick.disabled = !deck.canVinyl;
+    if (scratchPick.value !== deck.scratchPattern) scratchPick.value = deck.scratchPattern;
     jogHint.textContent = vinyl ? 'SCRATCH' : 'JOG';
     platter.classList.toggle('vinyl', vinyl);
     platter.title = vinyl ? 'Vinyl: drag to scratch' : 'Jog: drag for pitchbend';
@@ -674,6 +719,13 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
     bpmField.classList.toggle('guess', !deck.bpmManual && deck.bpmConfidence > 0 && deck.bpmConfidence < 0.35);
     tempoVal.textContent = `${deck.tempo >= 0 ? '+' : ''}${deck.tempo.toFixed(1)}%`;
     btnTempoRange.textContent = `±${deck.tempoRange}`;
+    // The range can be widened programmatically by an automatic match, so the
+    // fader's bounds are read from the deck rather than only set on click.
+    if (tempoFader.max !== String(deck.tempoRange)) {
+      tempoFader.min = String(-deck.tempoRange);
+      tempoFader.max = String(deck.tempoRange);
+    }
+    tempoFader.value = String(deck.tempo);
 
     const limited = deck.backend === 'element';
     for (const el of [eqHigh.f, eqMid.f, eqLow.f, filterFader]) el.disabled = limited;

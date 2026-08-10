@@ -3,7 +3,7 @@ import * as wl from '../lib/wavlake.js';
 import { loadPlaylists, resolvePlaylist } from '../lib/nostr.js';
 import { store } from '../lib/nap.js';
 import { setImage } from '../lib/artwork.js';
-import { trackFromFile } from '../lib/localtracks.js';
+import { trackFromFile, fetchLabTracks } from '../lib/localtracks.js';
 
 const CRATE_KEY = 'crate.v1';
 
@@ -42,15 +42,27 @@ export function Browser({ onLoadDeck, onZap, capabilities }) {
     'aria-label': 'Nostr pubkey',
   });
 
-  const tabs = [
+  const TAB_DEFS = [
     ['charts', 'Charts'],
     ['search', 'Search'],
     ['crate', 'Crate'],
     ['nostr', 'Nostr'],
-  ].map(([key, label]) =>
+    // Only under `npm run dev`: the folder-backed test crate. The plugin that
+    // serves it is dev-only too, so shipping this tab would be a dead end.
+    ...(import.meta.env.DEV ? [['lab', '✳ Lab']] : []),
+  ];
+
+  const tabs = TAB_DEFS.map(([key, label]) =>
     h('button', {
       class: 'tab',
-      onclick: () => { tab = key; renderSide(); if (key === 'charts') loadCharts(40); else if (key === 'crate') showCrateHome(); else renderList(); },
+      onclick: () => {
+        tab = key;
+        renderSide();
+        if (key === 'charts') loadCharts(40);
+        else if (key === 'crate') showCrateHome();
+        else if (key === 'lab') loadLab();
+        else renderList();
+      },
     }, label),
   );
 
@@ -126,6 +138,22 @@ export function Browser({ onLoadDeck, onZap, capabilities }) {
 
   async function loadCharts(limit = 40) {
     await guard(async () => setItems(await wl.topTracks(limit), `Wavlake Top ${limit}`, 'Ranked by sats over the last 7 days'), 'Charts');
+  }
+
+  /** The ./scratch-lab folder, served by the dev server. */
+  async function loadLab() {
+    await guard(async () => {
+      // fetchLabTracks carries the DEV guard, so this whole path drops out of
+      // a production build rather than shipping a dev endpoint in the napplet.
+      const tracks = await fetchLabTracks();
+      setItems(
+        tracks,
+        'Scratch lab',
+        tracks.length
+          ? `${tracks.length} test track${tracks.length === 1 ? '' : 's'} from ./scratch-lab — decoded, so the platter works`
+          : 'Empty — drop audio into the ./scratch-lab folder and press Rescan',
+      );
+    }, 'Scratch lab');
   }
 
   async function loadNew() {
@@ -311,10 +339,7 @@ export function Browser({ onLoadDeck, onZap, capabilities }) {
   }
 
   function renderSide() {
-    for (let i = 0; i < tabs.length; i++) {
-      const key = ['charts', 'search', 'crate', 'nostr'][i];
-      tabs[i].classList.toggle('on', key === tab);
-    }
+    for (let i = 0; i < tabs.length; i++) tabs[i].classList.toggle('on', TAB_DEFS[i][0] === tab);
     clear(sideEl);
     if (tab === 'charts') {
       sideEl.appendChild(h('div', { class: 'side-group' },
@@ -332,6 +357,13 @@ export function Browser({ onLoadDeck, onZap, capabilities }) {
         for (const gen of genreList.slice(0, 24)) g.appendChild(chip(`${gen.name}`, () => loadRandom(gen)));
       }
       sideEl.appendChild(g);
+    } else if (tab === 'lab') {
+      sideEl.appendChild(h('div', { class: 'side-group' },
+        h('div', { class: 'side-h' }, 'Scratch lab'),
+        h('div', { class: 'muted' }, 'Audio files in the ./scratch-lab folder at the repo root. Served straight off disk by the dev server, so they decode and the platter, FX and autoscratch all work — unlike streamed tracks in a plain dev run.'),
+        chip('Rescan folder', () => loadLab()),
+        h('div', { class: 'muted' }, 'A one- to two-second vocal or horn stab is what the scratch routines are built around. Set CUE on its first transient before hitting AUTO ✳.'),
+      ));
     } else if (tab === 'search') {
       sideEl.appendChild(h('div', { class: 'side-group' },
         h('div', { class: 'side-h' }, 'Search Wavlake'),
