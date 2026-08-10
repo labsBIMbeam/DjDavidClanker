@@ -1,18 +1,17 @@
 /**
- * E2E for the automix across MULTIPLE transitions.
+ * Automix state machine, headless.
  *
- * The smoke suite drives exactly one handover, which is why a whole class of
- * bugs hid behind it: everything that only goes wrong once a deck has been
- * live and handed over. This suite plays three tracks in a row and insists
- * that each one is new.
+ * Automix touches no audio nodes — it only calls public Deck/Mixer methods —
+ * so it can be driven against fakes and stepped in simulated time. This is the
+ * regression net for the transition bug: a deck coming off a fade still holds
+ * its finished track at `status === 'ready'` with the playhead at the end, and
+ * the stager used to read that as "next track already cued", fade back into it
+ * and produce silence from the second transition onward.
  *
- *   node dev/serve-shell.mjs   (running)   →   node dev/automix-check.mjs
+ *   node dev/automix-check.mjs
  */
 
-import { chromium } from 'playwright';
-
-const BASE = process.env.BASE || 'http://127.0.0.1:5178';
-const OUT = process.env.OUT || '/tmp/automix';
+import { Automix } from '../src/audio/automix.js';
 
 const results = [];
 const check = (name, ok, detail = '') => {
@@ -20,107 +19,176 @@ const check = (name, ok, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  — ' + detail : ''}`);
 };
 
-const browser = await chromium.launch({
-  args: ['--autoplay-policy=no-user-gesture-required', '--no-sandbox'],
-});
-const page = await browser.newPage({ viewport: { width: 1440, height: 1200 } });
-await page.goto(BASE, { waitUntil: 'domcontentloaded' });
-const frame = await (await page.waitForSelector('#frame')).contentFrame();
-await frame.waitForSelector('.deck-A', { timeout: 15000 });
-await frame.waitForSelector('.track-row', { timeout: 30000 });
+class FakeDeck {
+  constructor(id) {
+    this.id = id;
+    this.status = 'empty';
+    this.track = null;
+    this.playing = false;
+    this.duration = 0;
+    this.position = 0;
+    this.bpm = 0;
+    this.tempo = 0;
+    this.tempoRange = 8;
+    this.nominalRate = 1;
+    this.cuePoint = 0;
+    this.syncedTo = null;
+    this.error = '';
+    this.plays = []; // every position playback was started from
+  }
 
-// Chart list as the queue, decks cleared: a genuine cold start.
-await frame.locator('.tab').first().click();
-await frame.locator('.automix .btn-mini').filter({ hasText: 'List' }).click();
-const queued = await frame.evaluate(() => window.__djclanker.automix.queue.length);
-check('queue filled from the browser', queued > 5, `${queued} tracks`);
+  get effectiveBpm() {
+    return this.bpm ? this.bpm * this.nominalRate : 0;
+  }
 
-await frame.evaluate(() => {
-  const m = window.__djclanker.mixer;
-  m.decks.A.pause();
-  m.decks.B.pause();
-});
-await frame.locator('.btn-automix').click();
+  async load(track) {
+    this.track = track;
+    this.duration = track.duration;
+    this.position = 0;
+    this.playing = false;
+    this.status = 'ready';
+    this.syncedTo = null;
+    // BPM detection is asynchronous in the real deck and lands after the
+    // decode; the delay is the whole reason sync has to be retried.
+    this.bpm = 0;
+    this._bpmIn = 3;
+    this._realBpm = track.bpm;
+  }
 
-await frame.waitForFunction(() => {
-  const am = window.__djclanker.automix;
-  return Boolean(am.liveId && am.liveDeck && am.liveDeck.playing);
-}, undefined, { timeout: 180000 });
+  play() {
+    this.playing = true;
+    this.plays.push(this.position);
+  }
 
-const first = await frame.evaluate(() => {
-  const am = window.__djclanker.automix;
-  return { id: am.liveId, trackId: am.liveDeck.track.id, title: am.liveDeck.track.title };
-});
-check('cold start went live', Boolean(first.trackId), `deck ${first.id}: ${first.title}`);
+  pause() {
+    this.playing = false;
+  }
 
-const played = [first.trackId];
-const titles = [first.title];
+  seek(t) {
+    this.position = t;
+  }
 
-/** Run one transition and return what went live, or null on timeout. */
-async function transition(n) {
-  // Open the preload window so staging starts now instead of 35 s from the end.
-  await frame.evaluate(() => { window.__djclanker.automix.preloadLead = 99999; });
+  syncTo(other) {
+    const target = typeof other === 'number' ? other : other.effectiveBpm;
+    if (!target || !this.bpm) return false;
+    let best = null;
+    for (const t of [target, target * 2, target / 2, target * 1.5, target / 1.5]) {
+      const pct = (t / this.bpm - 1) * 100;
+      if (Math.abs(pct) <= this.tempoRange && (!best || Math.abs(pct) < Math.abs(best))) best = pct;
+    }
+    if (best === null) return false;
+    this.tempo = best;
+    this.nominalRate = 1 + best / 100;
+    this.syncedTo = typeof other === 'number' ? 'num' : other.id;
+    return true;
+  }
 
-  // The real assertion: the idle deck must end up holding a track we have not
-  // played yet. With the ping-pong bug it keeps the previous one forever.
-  const staged = await frame
-    .waitForFunction((seen) => {
-      const am = window.__djclanker.automix;
-      const idle = am.idleDeck;
-      return Boolean(idle && idle.status === 'ready' && idle.track && !am.busy
-        && !seen.includes(idle.track.id));
-    }, played, { timeout: 120000 })
-    .then(() => frame.evaluate(() => {
-      const t = window.__djclanker.automix.idleDeck.track;
-      return { trackId: t.id, title: t.title };
-    }))
-    .catch(() => null);
+  setTempoRange(r) {
+    this.tempoRange = r;
+  }
 
-  if (!staged) return null;
+  matchTempoTo(other, ranges = [8, 16, 50]) {
+    if (!other || !this.bpm || !other.effectiveBpm) return false;
+    const start = this.tempoRange;
+    for (const r of ranges.filter((v) => v >= start)) {
+      this.tempoRange = r;
+      if (this.syncTo(other)) return true;
+    }
+    this.tempoRange = start;
+    return false;
+  }
 
-  // Drop the playhead into the outro so the transition fires now.
-  const prevId = await frame.evaluate(() => {
-    const am = window.__djclanker.automix;
-    am.fadeSeconds = 3;
-    am.preloadLead = 18;
-    am.liveDeck.seek(am.liveDeck.duration - 2.6);
-    return am.liveId;
-  });
-
-  await frame.waitForFunction((prev) => {
-    const am = window.__djclanker.automix;
-    return !am.fade && am.liveId && am.liveId !== prev;
-  }, prevId, { timeout: 60000 }).catch(() => {});
-
-  return frame.evaluate(() => {
-    const am = window.__djclanker.automix;
-    return { id: am.liveId, trackId: am.liveDeck.track.id, title: am.liveDeck.track.title };
-  });
+  advance(dt) {
+    if (this._bpmIn > 0 && --this._bpmIn === 0) this.bpm = this._realBpm;
+    if (this.playing) this.position = Math.min(this.duration, this.position + dt * this.nominalRate);
+  }
 }
 
-for (let n = 1; n <= 2; n++) {
-  const got = await transition(n);
-  const fresh = got && !played.includes(got.trackId);
-  check(`transition ${n} staged and played a new track`, Boolean(fresh),
-    got ? `deck ${got.id}: ${got.title}` : 'no unplayed track ever reached the idle deck');
-  if (!got) break;
-  played.push(got.trackId);
-  titles.push(got.title);
+class FakeMixer {
+  constructor() {
+    this.decks = { A: new FakeDeck('A'), B: new FakeDeck('B') };
+    this.crossfader = 0;
+  }
+
+  setCrossfader(v) {
+    this.crossfader = Math.max(-1, Math.min(1, v));
+  }
 }
 
-check('three distinct tracks played in a row', new Set(played).size === 3,
-  titles.join(' → '));
+/* ------------------------------------------------------------------ */
 
-await frame.evaluate(() => {
-  const am = window.__djclanker.automix;
-  if (am.enabled) am.toggle();
-  am.mixer.decks.A.pause();
-  am.mixer.decks.B.pause();
+const QUEUE = [
+  { id: 't1', title: 'One', artist: 'A', duration: 60, bpm: 120 },
+  { id: 't2', title: 'Two', artist: 'B', duration: 60, bpm: 128 },
+  { id: 't3', title: 'Three', artist: 'C', duration: 60, bpm: 100 },
+  { id: 't4', title: 'Four', artist: 'D', duration: 60, bpm: 140 },
+];
+
+const TRACE = process.env.TRACE === '1';
+const mixer = new FakeMixer();
+const played = [];
+let step = 0;
+const automix = new Automix(mixer, {
+  onCrossfade: () => {},
+  onTrack: (t) => {
+    played.push(t.id);
+    if (TRACE) {
+      const live = automix.liveId;
+      console.log(
+        `t=${(step * 0.25).toFixed(1)}s  LIVE ${t.id} on ${live}  cursor=${automix.cursor}` +
+        `  A=${mixer.decks.A.track?.id}@${mixer.decks.A.position.toFixed(1)}` +
+        `  B=${mixer.decks.B.track?.id}@${mixer.decks.B.position.toFixed(1)}` +
+        `  spent=[${[...automix._spent]}]`,
+      );
+    }
+  },
+  refill: () => [],
 });
+automix.setQueue(QUEUE.slice());
+automix.fadeSeconds = 6;
+automix.preloadLead = 20;
+automix.start();
 
-await page.screenshot({ path: `${OUT}-automix.png`, fullPage: true });
-await browser.close();
+const DT = 0.25;
+let silentTicks = 0;
+let maxSilentRun = 0;
+let badFade = '';
 
-const failed = results.filter((r) => !r.ok);
-console.log(`\n${results.length - failed.length}/${results.length} checks passed`);
-process.exit(failed.length ? 1 : 0);
+for (step = 0; step < 4000; step++) {
+  automix.tick(DT);
+  for (const d of Object.values(mixer.decks)) d.advance(DT);
+  await Promise.resolve(); // let _loadInto settle
+
+  // A deck the mix has faded into must never be sitting on its last sample.
+  for (const d of Object.values(mixer.decks)) {
+    const gain = d.id === 'A' ? (1 - mixer.crossfader) / 2 : (mixer.crossfader + 1) / 2;
+    if (gain > 0.5 && d.playing && d.position >= d.duration - 0.01 && !badFade) {
+      badFade = `deck ${d.id} is live at the end of "${d.track && d.track.title}"`;
+    }
+  }
+
+  // Audible = some deck that is playing, not finished, is open on the fader.
+  const audible = Object.values(mixer.decks).some((d) => {
+    const gain = d.id === 'A' ? (1 - mixer.crossfader) / 2 : (mixer.crossfader + 1) / 2;
+    return d.playing && d.position < d.duration - 0.01 && gain > 0.02;
+  });
+  if (audible) silentTicks = 0;
+  else if (++silentTicks > maxSilentRun) maxSilentRun = silentTicks;
+}
+
+check('every queued track went live', played.length >= 4 && QUEUE.every((t) => played.includes(t.id)),
+  `played: ${played.join(' → ') || 'nothing'}`);
+check('no transition faded into a finished deck', !badFade, badFade);
+check('mix never went silent for long', maxSilentRun * DT < 3,
+  `longest gap ${(maxSilentRun * DT).toFixed(2)} s`);
+check('each playback started from the top, not the end',
+  Object.values(mixer.decks).every((d) => d.plays.every((p) => p < d.duration - 1)),
+  `starts A=[${mixer.decks.A.plays.map((p) => p.toFixed(1))}] B=[${mixer.decks.B.plays.map((p) => p.toFixed(1))}]`);
+
+const synced = Object.values(mixer.decks).some((d) => d.syncedTo);
+check('tempo sync landed despite late BPM detection', synced,
+  `A→${mixer.decks.A.syncedTo} rate ${mixer.decks.A.nominalRate.toFixed(3)}, B→${mixer.decks.B.syncedTo} rate ${mixer.decks.B.nominalRate.toFixed(3)}`);
+
+const failed = results.filter((r) => !r.ok).length;
+console.log(`\n${results.length - failed}/${results.length} passed`);
+process.exit(failed ? 1 : 0);

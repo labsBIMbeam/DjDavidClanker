@@ -2,3 +2,7 @@ node_modules/
 dist/
 .napplet/
 *.log
+
+# Local test audio — the folder and its README stay, the music does not.
+scratch-lab/*
+!scratch-lab/README.md
