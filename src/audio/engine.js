@@ -225,6 +225,7 @@ export class Deck extends Emitter {
     this.structure = null;
     this.musicalKey = null;
     this._analysisFromCache = false;
+    this._analysisDone = false;
     this._drop = null;
     this._taps = [];
     this.autoScratch = null;
@@ -400,6 +401,7 @@ export class Deck extends Emitter {
         if (token !== this._loadToken) return;
         if (key.pitchClass >= 0) this.musicalKey = key;
       }
+      this._analysisDone = true;
       this.emit('structure');
 
       if (cacheId && this.bpm > 0) {
@@ -490,7 +492,7 @@ export class Deck extends Emitter {
     this.emit('cue-listen');
   }
 
-  play() {
+  play({ instant = false } = {}) {
     if (this.status !== 'ready') return;
     this.mixer.ensureContext();
     this.mixer.resumeAudio();
@@ -509,12 +511,14 @@ export class Deck extends Emitter {
     if (this.playing && this._mode !== 'idle') return;
     this.playing = true;
 
-    if (this.vinylMode) {
+    if (this.vinylMode && !instant) {
       // Spin-up: the motor takes the record from a standstill to speed, and
       // you hear it — that is the whole point of the vinyl mode.
       this._enterPlatter(0);
       this._motorTo(this.nominalRate, this.spinUpTime, () => this._enterSource(this._turntable.position));
     } else {
+      // `instant` is the CDJ start — the automix uses it so a programmed
+      // entrance never carries the audible pitch ramp of the vinyl motor.
       this._enterSource(this._pausedAt);
     }
     this.emit('transport');
@@ -863,7 +867,9 @@ export class Deck extends Emitter {
     // are ridden out with micro-nudges; big ones (deck was scratched, or it
     // just started) get one hard realign, rate-limited so it cannot flutter.
     const o = this.syncedTo;
-    if (o && this.backend === 'buffer' && this._mode === 'source' && this.playing
+    // The latch stays out while a scheduled start is armed: alignPhase seeks,
+    // and a seek would rebuild the source and destroy the pending start.
+    if (o && !this._drop && this.backend === 'buffer' && this._mode === 'source' && this.playing
       && o.playing && this.bpm && o.effectiveBpm) {
       const beat = 60 / this.effectiveBpm;
       const obeat = 60 / o.effectiveBpm;
@@ -1057,21 +1063,38 @@ export class Deck extends Emitter {
     this.mixer.resumeAudio();
     this.syncTo(other.effectiveBpm);
 
-    const ctx = this.mixer.ctx;
-    const mod = (x, m) => ((x % m) + m) % m;
-    const obeat = 60 / other.effectiveBpm;
-    const obar = 4 * obeat;
-    const oAnchor = Number.isFinite(other.barOffset) ? other.barOffset : other.beatOffset || 0;
-    const trackWait = obar - mod(other.position - oAnchor, obar);
-    const otherRate = Math.abs(other.currentRate || other.nominalRate) || 1;
-    let wait = trackWait / otherRate;
-    if (wait < 0.06) wait += obar / otherRate; // too tight to schedule cleanly
-    const when = ctx.currentTime + wait;
-
+    const when = Deck.nextBarTime(other, this.mixer.ctx);
     const bar = 4 * (60 / this.bpm);
     const anchor = Number.isFinite(this.barOffset) ? this.barOffset : this.beatOffset || 0;
     const raw = this.cuePoint || anchor;
     const offset = clamp(anchor + Math.round((raw - anchor) / bar) * bar, 0, this.duration);
+    return this.armStartAt(when, offset, { plannedBy: 'user' });
+  }
+
+  /** Wall-clock ctx time of `host`'s next bar-1, `bars` further ahead. */
+  static nextBarTime(host, ctx, { bars = 0, minLead = 0.06 } = {}) {
+    const mod = (x, m) => ((x % m) + m) % m;
+    const obeat = 60 / host.effectiveBpm;
+    const obar = 4 * obeat;
+    const oAnchor = Number.isFinite(host.barOffset) ? host.barOffset : host.beatOffset || 0;
+    const trackWait = obar - mod(host.position - oAnchor, obar);
+    const rate = Math.abs(host.currentRate || host.nominalRate) || 1;
+    let wait = trackWait / rate + (bars * obar) / rate;
+    if (wait < minLead) wait += obar / rate; // too tight to schedule cleanly
+    return ctx.currentTime + wait;
+  }
+
+  /**
+   * Schedule this deck's source to start sample-accurately at ctx time `when`
+   * from track-time `offset`. Bypasses the vinyl spin-up, carries an active
+   * loop and back-dates the position clock, so `position` reads correctly on
+   * both sides of the moment. `_drop.plannedBy` tells a user-armed DROP apart
+   * from an automix-scheduled entrance.
+   */
+  armStartAt(when, offset, { plannedBy = 'user' } = {}) {
+    if (this.backend !== 'buffer' || this.status !== 'ready' || !this._buffer) return false;
+    const ctx = this.mixer.ctx;
+    if (!ctx || !(when > ctx.currentTime)) return false;
 
     this._stopSource();
     if (this._turntable && this._turntable.active) this._turntable.stop();
@@ -1092,14 +1115,15 @@ export class Deck extends Emitter {
         this.emit('ended');
       }
     };
-    src.start(when, offset);
+    const off = clamp(offset, 0, this.duration);
+    src.start(when, off);
     this._src = src;
     this._startCtxTime = when;
-    this._startOffset = offset;
+    this._startOffset = off;
     this._mode = 'source';
     this.playing = true;
     this._afterMotor = null;
-    this._drop = { when };
+    this._drop = { when, plannedBy };
     this.emit('drop');
     this.emit('transport');
     return true;

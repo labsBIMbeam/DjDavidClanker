@@ -95,6 +95,9 @@ async function loadFixture(fix) {
     mimeType: 'audio/wav',
     buffer: makeStructuredWav({ bpm: fix.bpm, root: fix.root }),
   });
+  // The pick triggers a list re-render; clicking into it mid-render detaches
+  // the row under the pointer. Let the DOM settle first.
+  await page.waitForTimeout(300);
   await frame.locator('.track-row', { hasText: fix.name.replace('.wav', '').split(' - ')[1] })
     .first().locator('.load-a').click();
   await frame.waitForFunction(() => {
@@ -171,7 +174,180 @@ check('second fixture: BPM 120 and G major / 9B',
   Math.abs(b.bpm - FIX_B.bpm) <= 0.15 && b.key.camelot === FIX_B.camelot,
   `${b.bpm} · ${b.key.name} (${b.key.camelot})`);
 
-await frame.evaluate(() => window.__djclanker.decks.A.pause());
+/* --------------------- part 2: the transition engine --------------------- */
+// Fixture B is already on deck A; put fixture A onto deck B so the pair is
+// 124 vs 120 BPM (foldable, camelot-adjacent) with known structure.
+
+await frame.locator('.track-row', { hasText: 'Alpha' }).first().locator('.load-b').click();
+await frame.waitForFunction(() => {
+  const d = window.__djclanker.decks.B;
+  return d.status === 'ready' && d._analysisDone;
+}, undefined, { timeout: 120000 });
+
+// Planner rules, asserted pure — no audio needs to run for these.
+const planner = await frame.evaluate(() => {
+  const { decks, planTransition } = window.__djclanker;
+  const live = decks.A;
+  const idle = decks.B;
+  const auto = planTransition(live, idle, { style: 'auto' });
+  const savedRange = idle.tempoRange;
+  idle.tempoRange = 1; // 124 vs 120 needs ~3.3% — now unreachable
+  const echo = planTransition(live, idle, { style: 'auto' });
+  idle.tempoRange = savedRange;
+  const savedSt = idle.structure;
+  idle.structure = null;
+  const fady = planTransition(live, idle, { style: 'auto' });
+  idle.structure = savedSt;
+  return {
+    auto: { style: auto.style, hasTimes: auto.startSec < auto.swapSec && auto.swapSec < auto.endSec },
+    echoStyle: echo.style,
+    fadeStyle: fady.style,
+    fadeReason: fady.reasons.join(','),
+  };
+});
+check('planner picks BLEND for a compatible structured pair',
+  planner.auto.style === 'blend' && planner.auto.hasTimes, planner.auto.style);
+check('planner degrades to ECHO when tempo is unreachable', planner.echoStyle === 'echo');
+check('planner degrades to FADE without structure', planner.fadeStyle === 'fade',
+  planner.fadeReason);
+
+/**
+ * Drive one automated transition. Seeks the live deck near its planned blend
+ * window so the suite does not sit through whole tracks, then waits for the
+ * handover and returns telemetry plus the assertions' raw material.
+ */
+async function runTransition({ nudgeXfMidway = false } = {}) {
+  return frame.evaluate(async (nudge) => {
+    const dj = window.__djclanker;
+    const am = dj.automix;
+    const live = am.liveDeck;
+    const idle = am.idleDeck;
+    // Jump to 30 bars before mix-out: enough runway for the preload (45 s to
+    // mix-out), the staging analysis and a full 16-bar blend with arm lead.
+    const st = live.structure;
+    const barTrack = st.barLen;
+    live.seek(st.mixOutSec - 30 * barTrack);
+    am.plan = null;
+    const t0 = performance.now();
+    let armSnapshot = null;
+    let phaseSnapshot = null;
+    let nudged = false;
+    const debug = { sawTransition: false, sawStyle: null, sawFade: false, states: [] };
+    while (performance.now() - t0 < 120000) {
+      await new Promise((r) => setTimeout(r, 60));
+      const tr = am.transition;
+      if (tr) {
+        debug.sawTransition = true;
+        debug.sawStyle = tr.telemetry.style;
+        if (debug.states[debug.states.length - 1] !== tr.state) debug.states.push(tr.state);
+      }
+      if (am.fade) debug.sawFade = true;
+      if (am.plan && !debug.plan) {
+        debug.plan = { style: am.plan.style, reasons: am.plan.reasons.slice() };
+      }
+      if (!debug.snap) {
+        debug.snap = {
+          stale: am.staleId, idleTrack: idle.track && idle.track.title,
+          idleReady: idle.status, idleDone: idle._analysisDone,
+          liveConf: live.structure ? live.structure.confidence : null,
+          idleConf: idle.structure ? idle.structure.confidence : null,
+          liveBpm: live.bpm, idleBpm: idle.bpm, idleRange: idle.tempoRange,
+        };
+      }
+      if (tr && !armSnapshot && idle._drop && idle._drop.plannedBy === 'automix') {
+        // Same-evaluate comparison: scheduled start vs the projected boundary.
+        const ctx = dj.mixer.ctx;
+        const rate = Math.abs(live.currentRate || live.nominalRate) || 1;
+        const projected = ctx.currentTime + (tr.plan.startSec - live.position) / rate;
+        armSnapshot = { deltaMs: Math.abs(idle._drop.when - projected) * 1000 };
+      }
+      if (tr && tr.state === 'OVERLAP' && !phaseSnapshot && idle.playing && !idle._drop) {
+        const mod = (x, m) => ((x % m) + m) % m;
+        const beatL = 60 / live.effectiveBpm;
+        const beatI = 60 / idle.effectiveBpm;
+        let err = mod(idle.position - (idle.beatOffset || 0), beatI) / beatI
+          - mod(live.position - (live.beatOffset || 0), beatL) / beatL;
+        if (err > 0.5) err -= 1;
+        if (err < -0.5) err += 1;
+        phaseSnapshot = { errBeats: Math.abs(err), latched: idle.syncedTo === live };
+      }
+      if (nudge && tr && tr.state === 'OVERLAP' && !nudged && tr.telemetry.startedAt) {
+        dj.mixer.setCrossfader(0.9 * (idle.id === 'A' ? -1 : 1)); // human grabs it
+        nudged = true;
+      }
+      if (!am.transition && am.liveId === idle.id) break;
+    }
+    return {
+      handedOver: am.liveId === idle.id,
+      telemetry: am.lastTransition,
+      armSnapshot,
+      phaseSnapshot,
+      debug,
+      oldDeck: { paused: !live.playing, eqLow: live.eq.low },
+      newDeck: { tempo: idle.tempo, synced: idle.syncedTo !== null, eqLow: idle.eq.low },
+    };
+  }, nudgeXfMidway);
+}
+
+// Set up: adopt deck A as live, queue the two locals, switch automix on.
+await frame.evaluate(() => {
+  const dj = window.__djclanker;
+  dj.mixer.resumeAudio();
+  dj.decks.B.pause();
+  dj.decks.A.play({ instant: true });
+  // Reversed so the second cycle stages Beta while Alpha is live — a real
+  // A→B→A rotation instead of the same file on both decks.
+  dj.automix.setQueue([...dj.browser.currentItems()].reverse());
+  if (!dj.automix.enabled) dj.automix.toggle();
+});
+
+const t1 = await runTransition();
+check('transition 1: hands over on the blend', t1.handedOver
+  && t1.telemetry && t1.telemetry.style === 'blend', t1.telemetry && t1.telemetry.style);
+check('transition 1: arm is sample-scheduled on the boundary (<5 ms)',
+  t1.armSnapshot && t1.armSnapshot.deltaMs < 5,
+  t1.armSnapshot ? `${t1.armSnapshot.deltaMs.toFixed(2)} ms` : 'never armed');
+check('transition 1: phase locked during overlap (<0.05 beat, latch on)',
+  t1.phaseSnapshot && t1.phaseSnapshot.errBeats < 0.05 && t1.phaseSnapshot.latched,
+  t1.phaseSnapshot ? `${t1.phaseSnapshot.errBeats.toFixed(3)} beats` : 'no snapshot');
+check('transition 1: bass swap ran to completion', t1.telemetry
+  && t1.telemetry.swapDoneAt > 0 && t1.newDeck.eqLow >= -0.5,
+  `in LOW=${t1.newDeck.eqLow}`);
+check('transition 1: outgoing paused with its LOW restored',
+  t1.oldDeck.paused && t1.oldDeck.eqLow >= -0.5, `LOW=${t1.oldDeck.eqLow}`);
+
+await frame.waitForFunction(() => {
+  const am = window.__djclanker.automix;
+  const d = am.liveDeck;
+  return d && Math.abs(d.tempo) < 0.5 && d.syncedTo === null;
+}, undefined, { timeout: 30000 });
+check('transition 1: tempo released back toward 0% and latch dropped', true);
+
+// Second cycle — the automix-check lesson: a bug on handover N=2 hides
+// behind a green N=1. Also grabs the crossfader mid-overlap (yield test).
+// The idle deck counts as staged only once the preload REFILLED it: the old
+// track is stale by definition, however 'ready' it still looks.
+await frame.waitForFunction(() => {
+  const am = window.__djclanker.automix;
+  const idle = am.idleDeck;
+  return idle && idle.status === 'ready' && idle._analysisDone && !am.busy
+    && am.staleId !== idle.id;
+}, undefined, { timeout: 180000 });
+const t2 = await runTransition({ nudgeXfMidway: true });
+check('transition 2: hands over again (second cycle)', t2.handedOver);
+check('transition 2: crossfader yielded to the human hand',
+  t2.telemetry && t2.telemetry.yielded.xf === true,
+  JSON.stringify(t2.debug));
+check('no cumulative pitch drift after two transitions', Math.abs(t2.newDeck.tempo) < 3.5,
+  `tempo=${t2.newDeck.tempo.toFixed(2)}%`);
+
+await frame.evaluate(() => {
+  const dj = window.__djclanker;
+  if (dj.automix.enabled) dj.automix.toggle();
+  dj.decks.A.pause();
+  dj.decks.B.pause();
+});
+
 await page.screenshot({ path: `${OUT}-analysis.png`, fullPage: true });
 await browser.close();
 

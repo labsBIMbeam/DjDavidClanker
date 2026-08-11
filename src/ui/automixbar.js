@@ -79,7 +79,7 @@ export function AutomixBar(automix, { onQueueFromBrowser }) {
 
     // The meter fills as the live track approaches its transition point.
     let pct = 0;
-    if (automix.fade) pct = 100;
+    if (automix.fade || automix.transition) pct = 100;
     else if (automix.enabled && automix.liveId) {
       const left = automix.remaining;
       if (Number.isFinite(left)) {
@@ -89,7 +89,7 @@ export function AutomixBar(automix, { onQueueFromBrowser }) {
       }
     }
     meter.firstChild.style.width = `${pct}%`;
-    meter.classList.toggle('hot', Boolean(automix.fade));
+    meter.classList.toggle('hot', Boolean(automix.fade || automix.transition));
   }
 
   // Chain onto whatever hook the caller already installed rather than

@@ -244,7 +244,7 @@ export function Browser({ onLoadDeck, onZap, capabilities }) {
   function trackRow(t, index) {
     const toDeck = (id) => h('button', {
       class: `btn btn-load load-${id.toLowerCase()}`,
-      title: `In Deck ${id} laden`,
+      title: `Load into deck ${id}`,
       onclick: (e) => { e.stopPropagation(); onLoadDeck(id, t); },
     }, id);
 
