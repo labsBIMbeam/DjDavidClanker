@@ -43,7 +43,17 @@ export function AutomixBar(automix, { onQueueFromBrowser }) {
     return b;
   };
   const btnSync = toggle('SYNC', () => automix.syncTempo, (v) => { automix.syncTempo = v; }, 'Pull the next deck onto the BPM before the transition');
-  const btnShuffle = toggle('SHUFFLE', () => automix.shuffle, (v) => { automix.shuffle = v; }, 'Random order instead of list order');
+
+  const ORDER_LABELS = { list: 'LIST', shuffle: 'SHUF', smart: 'SMART' };
+  const ORDERS = ['list', 'shuffle', 'smart'];
+  const btnOrder = h('button', {
+    class: 'btn btn-mini',
+    title: 'Track order: LIST as queued · SHUF random · SMART picks by key/BPM/energy continuity',
+    onclick: () => {
+      automix.order = ORDERS[(ORDERS.indexOf(automix.order) + 1) % ORDERS.length];
+      render();
+    },
+  }, ORDER_LABELS[automix.order] || 'LIST');
 
   const meter = h('div', { class: 'am-meter' }, h('div', { class: 'am-meter-fill' }));
 
@@ -58,7 +68,7 @@ export function AutomixBar(automix, { onQueueFromBrowser }) {
       btnLoad,
       h('div', { class: 'am-fade-box' }, h('span', { class: 'fx-lbl' }, 'Fade'), fadeFader, fadeVal),
       btnSync,
-      btnShuffle,
+      btnOrder,
     ),
   );
 
@@ -67,7 +77,8 @@ export function AutomixBar(automix, { onQueueFromBrowser }) {
     btnOn.textContent = automix.enabled ? '■ AUTOMIX' : '▶▶ AUTOMIX';
     btnNext.disabled = !automix.enabled;
     btnSync._sync();
-    btnShuffle._sync();
+    btnOrder.textContent = ORDER_LABELS[automix.order] || 'LIST';
+    btnOrder.classList.toggle('on', automix.order !== 'list');
     root.classList.toggle('active', automix.enabled);
   }
 

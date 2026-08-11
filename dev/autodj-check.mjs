@@ -348,6 +348,105 @@ await frame.evaluate(() => {
   dj.decks.B.pause();
 });
 
+/* ---------------------- part 3: smart selection ---------------------- */
+
+const scores = await frame.evaluate(() => {
+  const s = window.__djclanker.selection;
+  return {
+    same: s.camelotScore('8B', '8B'),
+    neighbour: s.camelotScore('8B', '9B'),
+    relative: s.camelotScore('8B', '8A'),
+    far: s.camelotScore('8B', '3B'),
+    unknown: s.camelotScore('8B', ''),
+    foldExact: s.bpmFoldScore(124, 62), // half-time fold lands at 0%
+    foldFar: s.bpmFoldScore(124, 95),
+    energyNear: s.energyScore(0.8, 0.75),
+  };
+});
+check('camelot scoring orders same > neighbour > relative > far',
+  scores.same === 1 && scores.neighbour === 0.9 && scores.relative === 0.85
+  && scores.far < 0.3 && scores.unknown === 0.6, JSON.stringify(scores));
+check('bpm fold scoring: octave fold is perfect, 95-vs-124 is out of range',
+  scores.foldExact > 0.99 && scores.foldFar === 0, `${scores.foldExact} / ${scores.foldFar}`);
+
+// A third fixture, harmonically and tempo-wise FAR from Alpha: 95 BPM, C# major.
+await frame.locator('input.local-input').setInputFiles({
+  name: 'KeyCis - Gamma.wav',
+  mimeType: 'audio/wav',
+  buffer: makeStructuredWav({ bpm: 95, root: 1 }),
+});
+await page.waitForTimeout(300);
+await frame.locator('.track-row', { hasText: 'Gamma' }).first().locator('.load-b').click();
+await frame.waitForFunction(() => {
+  const d = window.__djclanker.decks.B;
+  return d.status === 'ready' && d._analysisDone && d.track && d.track.title === 'Gamma';
+}, undefined, { timeout: 120000 });
+
+const smart = await frame.evaluate(() => {
+  const dj = window.__djclanker;
+  const am = dj.automix;
+  // Live basis: deck A holds Beta (120 BPM, 9B) from the transition cycles.
+  am.liveId = 'A';
+  am.order = 'smart';
+  am.history = [];
+  const items = dj.browser.currentItems();
+  const gamma = items.find((t) => t.title === 'Gamma');
+  const alpha = items.find((t) => t.title === 'Alpha');
+  am.setQueue([gamma, alpha]); // the far track sits FIRST in the list
+  const pick1 = am._takeNext();
+  am.setQueue([{ id: 'u1', title: 'u1' }, { id: 'u2', title: 'u2' }]);
+  const pick2 = am._takeNext();
+  am.order = 'smart';
+  return { smartPick: pick1 && pick1.title, neutralPick: pick2 && pick2.id };
+});
+check('smart order picks the compatible track over the list head',
+  smart.smartPick === 'Alpha', `picked ${smart.smartPick}`);
+check('uncached candidates degrade to list order', smart.neutralPick === 'u1');
+
+// Preanalyzer: a NEVER-loaded fixture gets analyzed in the background, and
+// no deck is touched to do it.
+await frame.locator('input.local-input').setInputFiles({
+  name: 'KeyF - Delta.wav',
+  mimeType: 'audio/wav',
+  buffer: makeStructuredWav({ bpm: 100, root: 5 }),
+});
+await page.waitForTimeout(300);
+const preSetup = await frame.evaluate(() => {
+  const dj = window.__djclanker;
+  const delta = dj.browser.currentItems().find((t) => t.title === 'Delta');
+  dj.automix.setQueue([delta]);
+  dj.automix.order = 'smart';
+  const before = {
+    cached: Boolean(dj.analysisCache.getAnalysis(dj.analysisCache.trackCacheId(delta))),
+    deckA: dj.decks.A.track && dj.decks.A.track.title,
+    deckB: dj.decks.B.track && dj.decks.B.track.title,
+  };
+  dj.preanalyzer.poke(true);
+  return before;
+});
+check('delta starts uncached', preSetup.cached === false);
+await frame.waitForFunction(() => {
+  const dj = window.__djclanker;
+  const delta = dj.automix.queue[0];
+  const e = dj.analysisCache.getAnalysis(dj.analysisCache.trackCacheId(delta));
+  return Boolean(e && e.bpm > 0);
+}, undefined, { timeout: 120000 });
+const pre = await frame.evaluate(() => {
+  const dj = window.__djclanker;
+  const delta = dj.automix.queue[0];
+  const e = dj.analysisCache.getAnalysis(dj.analysisCache.trackCacheId(delta));
+  return {
+    bpm: e.bpm,
+    camelot: e.k ? true : false,
+    deckA: dj.decks.A.track && dj.decks.A.track.title,
+    deckB: dj.decks.B.track && dj.decks.B.track.title,
+  };
+});
+check('preanalyzer caches BPM and key without touching a deck',
+  Math.abs(pre.bpm - 100) <= 0.2 && pre.camelot
+  && pre.deckA === preSetup.deckA && pre.deckB === preSetup.deckB,
+  `bpm=${pre.bpm} decks ${pre.deckA}/${pre.deckB}`);
+
 await page.screenshot({ path: `${OUT}-analysis.png`, fullPage: true });
 await browser.close();
 
