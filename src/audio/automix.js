@@ -11,6 +11,8 @@
  */
 
 import { TRANSITIONS, Transition, pickTransition, minSecondsFor } from './transitions.js';
+import { pickNextIndex } from './harmony.js';
+import { compatibility } from './key.js';
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
@@ -22,13 +24,17 @@ export class Automix {
    * @param {(t:object)=>void} [hooks.onTrack]    a track just went live
    * @param {()=>Array}       [hooks.refill]      called when the queue empties
    * @param {(s:string)=>void}[hooks.onStatus]
+   * @param {import('./harmony.js').TrackKeys} [hooks.keys] remembered analysis,
+   *   which is what lets the next track be chosen for its key before it is
+   *   loaded rather than argued with afterwards.
    */
-  constructor(mixer, { onCrossfade, onTrack, refill, onStatus } = {}) {
+  constructor(mixer, { onCrossfade, onTrack, refill, onStatus, keys } = {}) {
     this.mixer = mixer;
     this.onCrossfade = onCrossfade || (() => {});
     this.onTrack = onTrack || (() => {});
     this.refill = refill || (() => []);
     this.onStatus = onStatus || (() => {});
+    this.keys = keys || null;
 
     this.enabled = false;
     /**
@@ -39,6 +45,24 @@ export class Automix {
     this.fadeSeconds = 26;
     this.syncTempo = true;
     this.shuffle = false;
+
+    /**
+     * Choose the next track for its key as well as its place in the list.
+     *
+     * Harmonic mixing on a rig without key lock has to happen at selection
+     * time: once a track is loaded, the only way to move its key is to move
+     * its speed, and losing the beat-match is worse than the clash. So the
+     * queue is read a few entries ahead and the one that fits is brought
+     * forward — never dropped, and never deferred indefinitely.
+     */
+    this.harmonic = true;
+    this.harmonyWindow = 6;
+
+    /** How many times each track id has been passed over for its key. */
+    this._deferrals = new Map();
+
+    /** Last handover's key relation, for the UI. */
+    this.harmony = null;
 
     /**
      * How often a handover is allowed an audible seam (cut, echo out, spinback)
@@ -88,6 +112,7 @@ export class Automix {
   setQueue(tracks, { keepPosition = false } = {}) {
     this.queue = (tracks || []).filter(Boolean);
     if (!keepPosition) this.cursor = 0;
+    this._deferrals.clear();
     this.onStatus('queue');
   }
 
@@ -108,16 +133,54 @@ export class Automix {
       }
     }
     if (this.shuffle && this.queue.length > 1) {
-      // Pick at random but never the track that is already live.
+      // Pick at random but never the track that is already live. With harmony
+      // on, the random draw becomes a shortlist and the best-fitting of them
+      // is taken — still shuffled, just not tone-deaf about it.
       const liveId = this.liveId && this.mixer.decks[this.liveId].track && this.mixer.decks[this.liveId].track.id;
-      let pick = null;
-      for (let i = 0; i < 8 && !pick; i++) {
+      const shortlist = [];
+      for (let i = 0; i < 8; i++) {
         const c = this.queue[Math.floor(Math.random() * this.queue.length)];
-        if (c && c.id !== liveId) pick = c;
+        if (c && c.id !== liveId && !shortlist.includes(c)) shortlist.push(c);
       }
-      return pick || this.queue[this.cursor++];
+      if (!shortlist.length) return this.queue[this.cursor++] || null;
+      const chosen = this._harmonicPick(shortlist, 0);
+      return shortlist[chosen.index];
     }
-    return this.queue[this.cursor++] || null;
+
+    const pick = this._harmonicPick(this.queue, this.cursor);
+    const track = this.queue[pick.index] || null;
+    if (track && pick.index !== this.cursor) {
+      // Move it to the front of what is left rather than dropping the entries
+      // it jumped: everything still plays, just in a better order.
+      this.queue.splice(pick.index, 1);
+      this.queue.splice(this.cursor, 0, track);
+    }
+    this.cursor++;
+    if (track) this._deferrals.delete(track.id);
+    return track;
+  }
+
+  /**
+   * Which of `list` from `from` onward should go next, by key.
+   *
+   * Falls straight through to the head of the list when harmony is off, when
+   * nothing has been analysed yet, or when the live deck's own key is unknown
+   * — a guess dressed up as harmonic mixing is worse than plain running order.
+   */
+  _harmonicPick(list, from) {
+    if (!this.harmonic || !this.keys) return { index: from, score: null, relation: '' };
+    const live = this.liveDeck;
+    if (!live) return { index: from, score: null, relation: '' };
+    return pickNextIndex(list, from, {
+      liveKey: live.soundingKey,
+      liveBpm: live.effectiveBpm || live.bpm || 0,
+      keys: this.keys,
+      // Reordering can wrap a short queue round onto the record that is
+      // playing, which plain list order never could.
+      excludeId: (live.track && live.track.id) || '',
+      window: this.harmonyWindow,
+      deferrals: this._deferrals,
+    });
   }
 
   /* ------------------------------ control ------------------------------ */
@@ -209,8 +272,32 @@ export class Automix {
     if (idle.syncedTo === live.id) return true;
     // matchTempoTo, not syncTo: a pair further apart than ±8% is common and
     // must widen the fader rather than silently leaving the decks unmatched.
-    if (!idle.matchTempoTo(live)) return false;
+    //
+    // preferKey costs nothing: where a track can be locked to the beat at more
+    // than one metrical level — half time, double time, three-halves — those
+    // are all exact matches sounding in different keys, so the one that fits
+    // the live deck is taken. No tempo accuracy is traded for it.
+    if (!idle.matchTempoTo(live, undefined, { preferKey: live.soundingKey })) return false;
     return true;
+  }
+
+  /**
+   * How the two decks' keys sit right now, and how much they may overlap.
+   *
+   * Unknown keys are not treated as a clash — most of a first pass through a
+   * fresh library is unknown, and refusing to blend any of it would make the
+   * mix sound broken to avoid a clash that may not exist.
+   */
+  _harmonyFor(live, idle) {
+    const a = live && live.soundingKey;
+    const b = idle && idle.soundingKey;
+    if (!a || !b) return { known: false, ok: true, score: null, relation: 'key unknown', maxOverlap: 'full' };
+    const c = compatibility(a, b);
+    // ok           — blend as long as you like.
+    // two steps    — passable in passing, not for thirty-two bars.
+    // anything else— the two must not be heard together at all.
+    const maxOverlap = c.ok ? 'full' : c.score >= 0.4 ? 'brief' : 'none';
+    return { known: true, ok: c.ok, score: c.score, relation: c.relation, maxOverlap, pair: `${a.camelot}→${b.camelot}` };
   }
 
   async _loadInto(deck, track) {
@@ -252,12 +339,18 @@ export class Automix {
     if (!idle.playing) idle.play();
 
     const runway = Math.max(1, dur);
+    // Keys are read after the sync above, because the sync is what decides
+    // them: these decks pitch-shift by resampling, so the tempo the incoming
+    // deck was just pulled onto IS its key.
+    const harmony = this._harmonyFor(live, idle);
+    this.harmony = harmony;
     const key = forceKey || pickTransition({
       liveBpm: live.effectiveBpm || live.bpm || 0,
       idleBpm: idle.effectiveBpm || idle.bpm || 0,
       seconds: runway,
       recent: this._recentFlows,
       markedRate: this.markedRate,
+      maxOverlap: harmony.maxOverlap,
     });
 
     const want = minSecondsFor(TRANSITIONS[key] || TRANSITIONS.longBlend, live.effectiveBpm || live.bpm || 0);
@@ -395,15 +488,33 @@ export class Automix {
     }
   }
 
+  /**
+   * How the next handover's keys look, from where the mix stands right now.
+   * During a transition this is the pair the running flow was chosen for;
+   * otherwise it is read live off the staged deck, so the bar shows a clash
+   * coming rather than only reporting it afterwards.
+   */
+  get harmonyNow() {
+    if (this.fade) return this.harmony;
+    const live = this.liveDeck;
+    const idle = this.idleDeck;
+    if (!live || !idle || idle.status !== 'ready' || this._spent.has(idle.id)) return null;
+    return this._harmonyFor(live, idle);
+  }
+
   /** Human-readable state for the UI bar. */
   describe() {
-    if (!this.enabled) return { label: 'OFF', detail: '' };
-    if (this.busy) return { label: 'LOADING', detail: this.pending ? `${this.pending.artist} – ${this.pending.title}` : '' };
+    const harmony = this.enabled ? this.harmonyNow : null;
+    const key = harmony && harmony.known
+      ? { text: `${harmony.pair} ${harmony.relation}`, ok: harmony.ok }
+      : null;
+    if (!this.enabled) return { label: 'OFF', detail: '', key: null };
+    if (this.busy) return { label: 'LOADING', detail: this.pending ? `${this.pending.artist} – ${this.pending.title}` : '', key };
     if (this.fade) {
       const d = this.fade.describe();
-      return { label: d.label.toUpperCase(), detail: `${d.remaining.toFixed(0)} s` };
+      return { label: d.label.toUpperCase(), detail: `${d.remaining.toFixed(0)} s`, key };
     }
-    if (!this.liveId) return { label: 'READY', detail: `${this.remainingInQueue} tracks queued` };
+    if (!this.liveId) return { label: 'READY', detail: `${this.remainingInQueue} tracks queued`, key };
     const idle = this.idleDeck;
     const left = this.remaining;
     const next = idle && idle.track ? `${idle.track.artist} – ${idle.track.title}` : 'next track pending';
@@ -411,6 +522,7 @@ export class Automix {
     return {
       label: 'LIVE',
       detail: `${next} · transition in ${untilFade > 3600 ? '—' : `${Math.round(untilFade)} s`}`,
+      key,
     };
   }
 }

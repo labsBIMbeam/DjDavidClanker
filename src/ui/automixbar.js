@@ -26,6 +26,12 @@ export function AutomixBar(automix, { onQueueFromBrowser }) {
 
   const label = h('span', { class: 'am-label' }, 'OFF');
   const detail = h('span', { class: 'am-detail' }, '');
+  // Camelot pair for the handover that is coming, so a clash is visible before
+  // it happens rather than only heard after it.
+  const keyInfo = h('span', {
+    class: 'am-key',
+    title: 'Key of the live deck and the staged one, at the tempo they will actually play at',
+  }, '');
 
   const fadeVal = h('span', { class: 'am-num' }, `${automix.fadeSeconds}s`);
   const fadeFader = fader({
@@ -44,13 +50,15 @@ export function AutomixBar(automix, { onQueueFromBrowser }) {
   };
   const btnSync = toggle('SYNC', () => automix.syncTempo, (v) => { automix.syncTempo = v; }, 'Pull the next deck onto the BPM before the transition');
   const btnShuffle = toggle('SHUFFLE', () => automix.shuffle, (v) => { automix.shuffle = v; }, 'Random order instead of list order');
+  const btnHarmonic = toggle('KEY', () => automix.harmonic, (v) => { automix.harmonic = v; },
+    'Harmonic mixing: bring a track that fits the key forward out of the next few in the queue, and never blend two that clash');
 
   const meter = h('div', { class: 'am-meter' }, h('div', { class: 'am-meter-fill' }));
 
   const root = h('div', { class: 'automix' },
     btnOn,
     h('div', { class: 'am-status' },
-      h('div', { class: 'am-line' }, label, detail),
+      h('div', { class: 'am-line' }, label, detail, keyInfo),
       meter,
     ),
     h('div', { class: 'am-controls' },
@@ -58,6 +66,7 @@ export function AutomixBar(automix, { onQueueFromBrowser }) {
       btnLoad,
       h('div', { class: 'am-fade-box' }, h('span', { class: 'fx-lbl' }, 'Fade'), fadeFader, fadeVal),
       btnSync,
+      btnHarmonic,
       btnShuffle,
     ),
   );
@@ -68,6 +77,7 @@ export function AutomixBar(automix, { onQueueFromBrowser }) {
     btnNext.disabled = !automix.enabled;
     btnSync._sync();
     btnShuffle._sync();
+    btnHarmonic._sync();
     root.classList.toggle('active', automix.enabled);
   }
 
@@ -76,6 +86,11 @@ export function AutomixBar(automix, { onQueueFromBrowser }) {
     const d = automix.describe();
     if (label.textContent !== d.label) label.textContent = d.label;
     if (detail.textContent !== d.detail) detail.textContent = d.detail;
+
+    const keyText = d.key ? d.key.text : '';
+    if (keyInfo.textContent !== keyText) keyInfo.textContent = keyText;
+    keyInfo.classList.toggle('ok', Boolean(d.key && d.key.ok));
+    keyInfo.classList.toggle('warn', Boolean(d.key && !d.key.ok));
 
     // The meter fills as the live track approaches its transition point.
     let pct = 0;

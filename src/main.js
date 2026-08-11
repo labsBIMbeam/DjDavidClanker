@@ -4,6 +4,7 @@ import { Mixer } from './audio/engine.js';
 import { Automix } from './audio/automix.js';
 import { Performer } from './audio/performer.js';
 import { planKeyMatch } from './audio/key.js';
+import { TrackKeys } from './audio/harmony.js';
 import { DeckPanel } from './ui/deck.js';
 import { AutomixBar } from './ui/automixbar.js';
 import { MixerStrip } from './ui/mixer.js';
@@ -23,6 +24,18 @@ const caps = capabilities();
 const mixer = new Mixer();
 const settings = { ...DEFAULTS };
 const setlist = [];
+
+/**
+ * BPM and key of everything this rig has ever analysed, kept between sessions.
+ *
+ * Harmonic mixing has to happen when the next track is *chosen* — once it is
+ * loaded, the only way to move its key is to move its speed, and these decks
+ * have no key lock. Choosing needs the key of tracks that are not loaded, so
+ * every analysis is remembered and the queue can be scored before anything is
+ * touched. Loaded lazily; an empty cache just means the first pass through a
+ * library is in list order, learning as it goes.
+ */
+const trackKeys = new TrackKeys();
 
 /* ------------------------------ shell ------------------------------ */
 
@@ -96,6 +109,7 @@ const automix = new Automix(mixer, {
   onTrack: (track) => recordPlay(track),
   // When the queue runs dry, take whatever the browser is currently showing.
   refill: () => browser.currentItems(),
+  keys: trackKeys,
   onStatus: (s) => {
     if (s === 'skip-error' && automix.lastError) toast(`Automix skipped: ${automix.lastError}`, 'warn');
     if (s === 'empty') toast('Automix has no tracks — load a list first.', 'warn');
@@ -151,6 +165,12 @@ for (const [id, panel] of [['A', panelA], ['B', panelB]]) {
 for (const id of ['A', 'B']) {
   const deck = mixer.decks[id];
   deck.on((what) => {
+    // Analysis arrives in two parts and is the only place keys ever come from,
+    // so both are filed against the track. Next time that track is anywhere in
+    // a queue, automix can judge it without loading it.
+    if (what === 'bpm' || what === 'key') {
+      trackKeys.remember(deck.track, { bpm: deck.bpm, key: deck.key });
+    }
     if (what === 'sync-request') {
       // SYNC is a latch: on = match tempo once, then hold the phase from the
       // frame loop until it is clicked off again.
@@ -162,7 +182,9 @@ for (const id of ['A', 'B']) {
       const other = mixer.decks[id === 'A' ? 'B' : 'A'];
       if (!other.effectiveBpm) return toast('The other deck has no BPM.', 'warn');
       const target = other.effectiveBpm;
-      const ok = deck.syncTo(other);
+      // Where half/double/three-halves time all beat-match, take the one that
+      // also sits in key — same lock, better sound, nothing given up.
+      const ok = deck.syncTo(other, { preferKey: other.soundingKey });
       const panel = id === 'A' ? panelA : panelB;
       panel.tempoFader.value = String(deck.tempo);
       if (ok) deck.setSynced(other);
@@ -242,12 +264,16 @@ function tempoMatch({ quiet = false, tries = 14 } = {}) {
   // — a 108 BPM track against a 185 BPM one, say — need more than ±8%, and
   // refusing to reach for ±16 or ±50 is just refusing to do the job.
   const startRange = other.tempoRange;
-  if (other.matchTempoTo(live, TEMPO_RANGES)) {
+  // preferKey only ever chooses between tempos that are already exact matches,
+  // so a plain TEMPO press cannot come out worse beat-wise for asking.
+  if (other.matchTempoTo(live, TEMPO_RANGES, { preferKey: live.soundingKey })) {
     other.setSynced(live);
     updateMatchInfo();
     if (!quiet) {
       const widened = other.tempoRange > startRange ? `, pitch range widened to ±${other.tempoRange}%` : '';
-      toast(`Deck ${other.id} matched to ${live.effectiveBpm.toFixed(1)} BPM (${other.tempo >= 0 ? '+' : ''}${other.tempo.toFixed(1)}%${widened}).`, 'ok');
+      const harmony = other.harmonyWith(live);
+      const inKey = harmony.ok ? `, in key (${harmony.relation})` : '';
+      toast(`Deck ${other.id} matched to ${live.effectiveBpm.toFixed(1)} BPM (${other.tempo >= 0 ? '+' : ''}${other.tempo.toFixed(1)}%${widened}${inKey}).`, 'ok');
     }
     return true;
   }
@@ -286,6 +312,8 @@ function autoTune({ quiet = false } = {}) {
   const plan = planKeyMatch(live.soundingKey, other.key, {
     matchedPercent,
     tempoRange: other.tempoRange,
+    liveBpm: live.effectiveBpm,
+    otherBpm: other.bpm,
   });
 
   if (plan.action === 'retune') {
@@ -293,6 +321,9 @@ function autoTune({ quiet = false } = {}) {
     other.setSynced(live);
     if (!quiet) toast(`Keys tuned together — ${plan.reason}.`, 'ok');
   } else if (plan.action === 'offer') {
+    // The only remaining move costs more tempo than the beat-match can absorb.
+    // Offer it rather than take it: two tracks drifting apart is worse than two
+    // tracks a step off, and the choice belongs to whoever is behind the decks.
     if (!quiet) toast(`Left the beat-match alone: ${plan.reason}.`, 'warn', 7000);
   } else if (!quiet) {
     toast(`Keys: ${plan.reason}.`, plan.relation && plan.reason.startsWith('already') ? 'ok' : 'warn');
@@ -577,7 +608,9 @@ function showHelp() {
       h('div', { class: 'side-h' }, 'Vinyl'),
       h('div', { class: 'muted' }, 'In VINYL mode the platter is a turntable: dragging scratches the audio forwards and backwards, stop brakes audibly, start spins up. CDJ mode starts instantly and the platter only pitchbends. Rewind accelerates the longer you hold — a tap gives a stutter, holding gives a full backspin.'),
       h('div', { class: 'side-h' }, 'Play both, tempo and key'),
-      h('div', { class: 'muted' }, 'PLAY BOTH starts both decks, beat-matches them, hands the queue to automix and turns the performer loose — blending, riding the fader, filter sweeps and the occasional scratch. It runs the tempo match and the key match for you; the two buttons beside it do each on their own. Each deck shows its Camelot key next to the BPM, and it is the key the deck is SOUNDING at, not the one detected: these decks pitch-shift by resampling, so a track pulled 6% faster to beat-match is also about a semitone sharp. That is also why AUTO TUNE will sometimes refuse — moving a key by a semitone costs about 6% tempo, and losing the beat-match is far more audible than a key clash, so anything that expensive is reported rather than applied.'),
+      h('div', { class: 'muted' }, 'PLAY BOTH starts both decks, beat-matches them, hands the queue to automix and turns the performer loose — blending, riding the fader, filter sweeps and the occasional scratch. It runs the tempo match and the key match for you; the two buttons beside it do each on their own. Each deck shows its Camelot key next to the BPM, and it is the key the deck is SOUNDING at, not the one detected: these decks pitch-shift by resampling, so a track pulled 6% faster to beat-match is also about a semitone sharp. That is also why AUTO TUNE will sometimes refuse — moving a key by a semitone costs about 6% tempo, and losing the beat-match is far more audible than a key clash, so anything that expensive is reported rather than applied. Where a track can be locked to the beat at more than one metrical relation — half time against two-thirds time, say — those sound about five semitones apart, and the one that fits is taken; that choice really is free.'),
+      h('div', { class: 'side-h' }, 'Mixing in key'),
+      h('div', { class: 'muted' }, 'Because a key cannot be moved here without moving the tempo, harmonic mixing happens when the NEXT TRACK IS CHOSEN rather than afterwards. Automix\'s KEY button reads a few entries ahead in the queue and brings forward one that fits the live deck — nothing is dropped, and a track that keeps being passed over is played anyway rather than stranded. BPM and key are remembered for every track this rig has analysed, so a second pass through a library mixes in key from the first handover; the first pass runs in list order and learns as it goes. When a clashing pair does have to be mixed, the two are never left blending full-range: the handover gets a cut, a spinback or a drop swap instead of a thirty-two bar blend, so the clash is never actually heard. The automix bar shows the coming pair\'s Camelot codes, amber when they fight.'),
       h('div', { class: 'side-h' }, 'Autoscratch'),
       h('div', { class: 'muted' }, 'AUTO ✳ performs a chosen scratch on the deck\'s own BPM, anchored at the cue point — set CUE on the sound you want to cut up first. The routines are grouped by what the fader is doing: Foundation leaves it open and lets the record do the work, Cuts hide the return stroke, Clicks interrupt a continuous motion (that is the whole difference between a transformer, a flare and a crab). HUMAN adds timing slop; at 0 it is a machine, and a crab in particular needs some. Touching the platter or hitting rewind takes the record straight back off it.'),
       h('div', { class: 'side-h' }, 'Automix'),
@@ -735,6 +768,9 @@ requestAnimationFrame(frame);
 
 (async function boot() {
   Object.assign(settings, await store.getJson(SETTINGS_KEY, DEFAULTS));
+  // Before any track is staged: this is what makes the second pass through a
+  // library mix in key instead of in list order.
+  await trackKeys.load();
   mixer.proxy = settings.proxy;
   mixer.decks.A.tempoRange = settings.pitchRange;
   mixer.decks.B.tempoRange = settings.pitchRange;
@@ -769,4 +805,8 @@ requestAnimationFrame(frame);
   };
   document.addEventListener('pointerdown', unlock, { once: true });
   document.addEventListener('keydown', unlock, { once: true });
+
+  // Writes are debounced a few seconds; closing the tab must not throw away
+  // the analysis of everything played in the last of them.
+  window.addEventListener('pagehide', () => { trackKeys.save(); });
 })();

@@ -283,5 +283,56 @@ for (const key of TRANSITION_KEYS.filter((k) => TRANSITIONS[k].cleanup)) {
   check('the same flow never lands twice in a row', repeats === 0, `${repeats} repeats`);
 }
 
+/* -------------------- keeping clashing tracks apart -------------------- */
+
+/**
+ * The overlap limit is the guarantee behind "no out-of-tune mixes". Two tracks
+ * whose keys fight must never be left playing together full-range, and unlike
+ * the energy preference this is not allowed to be overridden by a shortage of
+ * fitting flows — the fallback has to be quieter, not louder.
+ */
+{
+  const overlap = (k) => TRANSITIONS[k].overlap;
+  check('every flow declares its overlap',
+    TRANSITION_KEYS.every((k) => ['full', 'brief', 'none'].includes(overlap(k))),
+    TRANSITION_KEYS.map((k) => `${k}:${overlap(k)}`).join(' '));
+
+  let worst = 'none';
+  const rank = { none: 0, brief: 1, full: 2 };
+  for (let i = 0; i < 400; i++) {
+    const key = pickTransition({ liveBpm: 124, idleBpm: 124 + (i % 11), seconds: 600, maxOverlap: 'none' });
+    if (rank[overlap(key)] > rank[worst]) worst = overlap(key);
+  }
+  check('a clash is never blended', worst === 'none', `worst overlap chosen was "${worst}"`);
+
+  worst = 'none';
+  for (let i = 0; i < 400; i++) {
+    const key = pickTransition({ liveBpm: 124, idleBpm: 124 + (i % 11), seconds: 600, maxOverlap: 'brief' });
+    if (rank[overlap(key)] > rank[worst]) worst = overlap(key);
+  }
+  check('a near-miss gets a brief overlap at most', worst !== 'full', `worst overlap chosen was "${worst}"`);
+
+  // The limit must survive a runway shortage. Widening the energy class is
+  // allowed; quietly falling back to a 30-second blend is not.
+  const cornered = pickTransition({ liveBpm: 128, idleBpm: 128, seconds: 4, maxOverlap: 'none' });
+  check('a cornered pick is still quiet and still fits',
+    overlap(cornered) === 'none' && minSecondsFor(TRANSITIONS[cornered], 128) <= 4,
+    `${cornered} — ${minSecondsFor(TRANSITIONS[cornered], 128).toFixed(1)}s`);
+
+  // Below even that there is nothing honest left, so the shortest flow wins
+  // over the overlap rule — but it must still be the shortest one.
+  const impossible = pickTransition({ liveBpm: 128, idleBpm: 128, seconds: 1, maxOverlap: 'none' });
+  check('an impossible runway takes the shortest flow there is',
+    TRANSITIONS[impossible].bars === Math.min(...TRANSITION_KEYS.map((k) => TRANSITIONS[k].bars)),
+    `${impossible} — ${TRANSITIONS[impossible].bars} bars`);
+
+  // With no limit asked for, nothing about the old behaviour may change.
+  let sawFull = false;
+  for (let i = 0; i < 200; i++) {
+    if (overlap(pickTransition({ liveBpm: 124, idleBpm: 124, seconds: 600 })) === 'full') sawFull = true;
+  }
+  check('an in-key pair still gets long blends', sawFull);
+}
+
 console.log(`\n${results.length - failed}/${results.length} passed`);
 process.exit(failed ? 1 : 0);

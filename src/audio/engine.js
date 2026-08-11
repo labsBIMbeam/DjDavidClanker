@@ -27,7 +27,7 @@ import { fetchBlob } from '../lib/nap.js';
 import { detectBpm, waveformPeaks, rms } from './analyze.js';
 import { Turntable, reversedBuffer } from './scratch.js';
 import { AutoScratch, SCRATCHES } from './autoscratch.js';
-import { detectKey, keyAtRate, compatibility } from './key.js';
+import { detectKey, keyAtRate, compatibility, tempoOptions, bestOption } from './key.js';
 import { Flanger, Gater, Phaser, Echo, Reverb } from './fx.js';
 
 /** Insert order in the chain — modulation first, gate, then time-based tails. */
@@ -896,13 +896,16 @@ export class Deck extends Emitter {
    * Every automatic path — the TEMPO button, automix's transitions, the
    * performer's upkeep — goes through here, so they all reach for a wider
    * fader in the same way instead of each quietly giving up at ±8 %.
+   *
+   * `opts` is passed straight to `syncTo`, so a caller that cares about key
+   * gets the harmonic choice at every fader width, not only the first one.
    */
-  matchTempoTo(other, ranges = [8, 16, 50]) {
+  matchTempoTo(other, ranges = [8, 16, 50], opts = {}) {
     if (!other || !this.bpm || !other.effectiveBpm) return false;
     const start = this.tempoRange;
     for (const r of ranges.filter((v) => v >= start)) {
       if (r !== this.tempoRange) this.setTempoRange(r);
-      if (this.syncTo(other)) return true;
+      if (this.syncTo(other, opts)) return true;
     }
     this.setTempoRange(start);
     return false;
@@ -937,20 +940,29 @@ export class Deck extends Emitter {
    * Match another deck's tempo, and — when both are actually running — nudge
    * this deck onto the other's beat grid. BPM alone gets you the same speed;
    * phase is what makes the kicks land together.
+   *
+   * Half, double and 3:2 relations count as matches: two detectors reading the
+   * same groove on different metrical levels (92.5 vs 138.75) must still sync
+   * to 0 %. Where more than one of them is reachable they are all equally
+   * locked to the beat but they sound in different keys, so `preferKey` picks
+   * the one that sits best against a given key. That choice is free — nothing
+   * is traded away for it — and it is the only key matching these decks can do
+   * without breaking the beat-match, since pitch here comes from resampling.
+   *
+   * @param {object|number} other
+   * @param {object} [opts]
+   * @param {object|null} [opts.preferKey] sounding key to be compatible with
    */
-  syncTo(other) {
+  syncTo(other, { preferKey = null } = {}) {
     const targetBpm = typeof other === 'number' ? other : other && other.effectiveBpm;
     if (!this.bpm || !targetBpm) return false;
 
-    // 2:3 relations included: two detectors reading the same groove on
-    // different metrical levels (92.5 vs 138.75) must still sync to 0 %.
-    let best = null;
-    for (const t of [targetBpm, targetBpm * 2, targetBpm / 2, targetBpm * 1.5, targetBpm / 1.5]) {
-      const pct = (t / this.bpm - 1) * 100;
-      if (Math.abs(pct) <= this.tempoRange && (!best || Math.abs(pct) < Math.abs(best))) best = pct;
-    }
-    if (best === null) return false;
-    this.setTempo(best);
+    const options = tempoOptions(this.bpm, targetBpm, this.tempoRange);
+    if (!options.length) return false;
+    // Nearest to zero unless a key preference picks differently; bestOption
+    // falls back to that same head when either key is unknown.
+    const pick = preferKey && this.key ? bestOption(preferKey, this.key, options) : options[0];
+    this.setTempo(pick.percent);
 
     if (typeof other === 'object' && other && other.playing && this.playing) this.alignPhase(other);
     return true;

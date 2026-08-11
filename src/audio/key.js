@@ -15,6 +15,11 @@
  * The important caveat for this app: the decks pitch-shift by resampling, so
  * changing tempo changes key. `keyAtRate` exists because a track's key at
  * +6 % is not the key it was detected at.
+ *
+ * That caveat is also why nothing here can reliably retune a loaded track into
+ * key — a semitone costs about 6 % tempo, which is more than a beat-match can
+ * absorb. Avoiding out-of-tune mixes is therefore mostly a matter of choosing
+ * what to play next; see `harmony.js`, which is built on `rateCandidate` here.
  */
 
 const NAMES = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'];
@@ -205,6 +210,117 @@ export function describePair(a, b) {
 }
 
 /**
+ * Metrical relations a beat-match is allowed to use.
+ *
+ * Two tracks are beat-matched not only when their BPMs are equal but when one
+ * is double, half, or in a 3:2 relation to the other — a 140 track over a 70
+ * track is locked, not mismatched. These are the ratios `syncTo` already
+ * accepts, named here because they are the raw material of free key changes:
+ * matching at 1.5× rather than 1× is a 50 % rate change, which is seven
+ * semitones of transposition bought for nothing at all in beat accuracy.
+ */
+export const SYNC_RATIOS = [1, 2, 0.5, 1.5, 2 / 3];
+
+/**
+ * Every exact beat-match of `bpm` onto `targetBpm` the pitch fader can reach.
+ *
+ * Sorted nearest-to-zero first, so the head of the list is what a tempo match
+ * with no other preference should take.
+ *
+ * @returns {Array<{percent:number, rate:number, ratio:number}>}
+ */
+export function tempoOptions(bpm, targetBpm, tempoRange) {
+  if (!bpm || !targetBpm) return [];
+  const out = [];
+  for (const ratio of SYNC_RATIOS) {
+    const percent = ((targetBpm * ratio) / bpm - 1) * 100;
+    if (Math.abs(percent) > tempoRange) continue;
+    if (out.some((o) => Math.abs(o.percent - percent) < 1e-6)) continue;
+    out.push({ percent, rate: 1 + percent / 100, ratio });
+  }
+  out.sort((a, b) => Math.abs(a.percent) - Math.abs(b.percent));
+  return out;
+}
+
+/**
+ * The best-sounding of several exact beat-matches.
+ *
+ * This is the only key matching on this rig that is genuinely free: every
+ * option handed in is already locked to the beat, so picking between them by
+ * key costs nothing in beat accuracy. It is not free in *character*, though —
+ * resampling a track 40 % faster does not just re-key it, it makes it sound
+ * like a different record — so `prefer` keeps the choice inside a range where
+ * a track still sounds like itself, and only widens if nothing is in there.
+ *
+ * In practice that leaves one real case, and it is a common one: a track
+ * around half the live tempo can usually be locked either at half time or at
+ * two-thirds time, and those are about five semitones apart. Everything else
+ * metrical is 33 % of rate away or more and gets ruled out here.
+ *
+ * Ties go to the smallest tempo move, so a plain tempo match with no key to go
+ * on behaves exactly as it did before.
+ *
+ * @param {object|null} liveKey  sounding key to sit against
+ * @param {object|null} ownKey   detected key of the deck being moved
+ * @param {Array} options        from `tempoOptions`
+ * @param {number} [prefer]      keep the choice within ±this %, if possible
+ */
+export function bestOption(liveKey, ownKey, options, prefer = 16) {
+  if (!options || !options.length) return null;
+  const musical = options.filter((o) => Math.abs(o.percent) <= prefer);
+  const pool = musical.length ? musical : options;
+  if (!liveKey || !ownKey) return { ...pool[0], score: null, relation: 'key unknown' };
+  let best = null;
+  for (const o of pool) {
+    const c = compatibility(liveKey, transpose(ownKey, semitonesForRate(o.rate)));
+    const cand = { ...o, score: c.score, relation: c.relation, ok: c.ok };
+    if (!best
+      || cand.score > best.score + 1e-9
+      || (Math.abs(cand.score - best.score) < 1e-9 && Math.abs(cand.percent) < Math.abs(best.percent))) {
+      best = cand;
+    }
+  }
+  return best;
+}
+
+/**
+ * How well a track *would* sit under a live deck once beat-matched.
+ *
+ * Used to choose what to play next rather than what to do with what is already
+ * loaded, so it works from remembered analysis (`{bpm, key}`) instead of a
+ * deck. A track whose key is not known yet scores `null` — unknown is not the
+ * same as bad, and the caller decides how much benefit of the doubt to give.
+ *
+ * `tempoRange` defaults to the widest fader position rather than the deck's
+ * current one, because every automatic match escalates through ±8/16/50 until
+ * it lands — judging a candidate against ±8 would write off tracks the mix
+ * would in fact have reached quite happily.
+ *
+ * @returns {{score:number|null, relation:string, percent:number}}
+ */
+export function rateCandidate(liveKey, liveBpm, entry, { tempoRange = 50 } = {}) {
+  if (!entry || !entry.key) return { score: null, relation: 'key unknown', percent: 0 };
+  if (!liveKey) return { score: null, relation: 'live key unknown', percent: 0 };
+
+  if (!entry.bpm || !liveBpm) {
+    // No tempo to project through: judge it at its own speed and accept that
+    // the beat-match will move it somewhat.
+    const c = compatibility(liveKey, entry.key);
+    return { score: c.score, relation: c.relation, percent: 0 };
+  }
+
+  const options = tempoOptions(entry.bpm, liveBpm, tempoRange);
+  if (!options.length) {
+    // Cannot be beat-matched inside the fader at all. Harmony is the least of
+    // that track's problems, so it is ranked below anything that can be.
+    const c = compatibility(liveKey, entry.key);
+    return { score: c.score * 0.3, relation: `${c.relation}, out of tempo range`, percent: 0 };
+  }
+  const best = bestOption(liveKey, entry.key, options);
+  return { score: best.score, relation: best.relation, percent: best.percent };
+}
+
+/**
  * Work out what, if anything, to do about two decks' keys.
  *
  * The hard constraint is that these decks pitch-shift by resampling: there is
@@ -222,10 +338,14 @@ export function describePair(a, b) {
  * @param {object} opts
  * @param {number} opts.matchedPercent tempo % that beat-matches the two decks
  * @param {number} opts.tempoRange     the deck's ± tempo fader range
+ * @param {number} [opts.liveBpm]  effective BPM of the live deck, and
+ * @param {number} [opts.otherBpm] base BPM of the deck being adjusted. Given
+ *   both, the free half/double/three-halves beat-matches are searched too —
+ *   those re-key the track without costing any beat accuracy at all.
  * @param {number} [opts.bpmTolerance] how much beat-match drift is acceptable,
  *   in percent. Below ~1 % two tracks audibly drift apart within a phrase.
  */
-export function planKeyMatch(liveKey, otherKey, { matchedPercent, tempoRange, bpmTolerance = 1.5 }) {
+export function planKeyMatch(liveKey, otherKey, { matchedPercent, tempoRange, liveBpm = 0, otherBpm = 0, bpmTolerance = 1.5 }) {
   if (!liveKey || !otherKey) {
     return { action: 'none', reason: 'key not detected on both decks', tempoPercent: matchedPercent };
   }
@@ -238,6 +358,22 @@ export function planKeyMatch(liveKey, otherKey, { matchedPercent, tempoRange, bp
       reason: `already ${already.relation} at the matched tempo`,
       tempoPercent: matchedPercent,
       relation: already.relation,
+    };
+  }
+
+  // Before spending any tempo, look at the other exact beat-matches. Playing a
+  // 174 track at half time against a 128 is just as locked as playing it at
+  // 128, and it sounds in a completely different key — a free re-key, and the
+  // only kind this rig can make without breaking something.
+  const free = bestOption(liveKey, otherKey, tempoOptions(otherBpm, liveBpm, tempoRange));
+  if (free && free.ok && Math.abs(free.percent - matchedPercent) > 1e-6) {
+    return {
+      action: 'retune',
+      reason: `beat-matched at ${free.ratio === 1 ? 'the same tempo' : `${free.ratio}× tempo`} instead — ${free.relation}, no beat accuracy given up`,
+      tempoPercent: free.percent,
+      relation: free.relation,
+      cost: 0,
+      free: true,
     };
   }
 

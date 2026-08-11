@@ -28,6 +28,13 @@
  *   marked  — audible seam, deliberately. Signals a change without a build.
  *   climax  — build and release. Only used when the incoming track is stepping
  *             the energy up; see pickTransition().
+ *
+ * Overlap classes — how much of the move has both tracks audible as pitched
+ * material at once. This is what decides whether a key clash is heard, so a
+ * pair whose keys fight is only ever given a flow that keeps them apart:
+ *   full   — both tracks up, full range, for bars at a time.
+ *   brief  — they cross for a moment, or one is filtered/gated to a texture.
+ *   none   — the incoming track is not heard until the outgoing one is gone.
  */
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
@@ -71,6 +78,7 @@ export const TRANSITIONS = {
   longBlend: {
     label: 'Long blend',
     energy: 'smooth',
+    overlap: 'full',
     bars: 32,
     blurb: 'Thirty-two bars of two tracks living together. Nobody notices the seam.',
     enter: (c) => c.idle.setEq('low', KILL),
@@ -88,6 +96,7 @@ export const TRANSITIONS = {
   eqBlend: {
     label: 'EQ blend',
     energy: 'smooth',
+    overlap: 'full',
     bars: 24,
     blurb: 'Mids and highs interleave first, then the bass changes hands in one move.',
     enter: (c) => {
@@ -112,6 +121,7 @@ export const TRANSITIONS = {
   bassSwap: {
     label: 'Bass swap',
     energy: 'smooth',
+    overlap: 'full',
     bars: 16,
     blurb: 'Both tracks up, lows traded on the downbeat. The workhorse.',
     enter: (c) => c.idle.setEq('low', KILL),
@@ -130,6 +140,7 @@ export const TRANSITIONS = {
   filterFade: {
     label: 'Filter fade',
     energy: 'smooth',
+    overlap: 'full',
     bars: 20,
     blurb: 'Outgoing track sinks under a low-pass while the incoming opens up.',
     enter: (c) => {
@@ -148,6 +159,7 @@ export const TRANSITIONS = {
   driftUnder: {
     label: 'Drift under',
     energy: 'smooth',
+    overlap: 'full',
     bars: 28,
     blurb: 'The new track slides in underneath and is simply there when the old one leaves.',
     enter: (c) => {
@@ -169,6 +181,7 @@ export const TRANSITIONS = {
   echoOut: {
     label: 'Echo out',
     energy: 'marked',
+    overlap: 'brief',
     bars: 12,
     blurb: 'Delay catches the last phrase and the outgoing channel steps away under it.',
     enter: (c) => c.idle.setEq('low', KILL),
@@ -189,6 +202,7 @@ export const TRANSITIONS = {
   loopRoll: {
     label: 'Loop roll',
     energy: 'marked',
+    overlap: 'brief',
     bars: 12,
     blurb: 'Outgoing track folds into a tightening loop and hands over on the release.',
     enter: (c) => c.idle.setEq('low', KILL),
@@ -208,6 +222,7 @@ export const TRANSITIONS = {
   cut: {
     label: 'Cut',
     energy: 'marked',
+    overlap: 'none',
     bars: 2,
     blurb: 'Straight swap on the downbeat. Momentum, no ceremony.',
     lanes: [
@@ -223,6 +238,7 @@ export const TRANSITIONS = {
   spinback: {
     label: 'Spinback',
     energy: 'marked',
+    overlap: 'none',
     bars: 8,
     blurb: 'The record is pulled back and the next one is already there.',
     lanes: [xfade(0.78, 0.9, 'out')],
@@ -245,6 +261,7 @@ export const TRANSITIONS = {
   dropSwap: {
     label: 'Drop swap',
     energy: 'climax',
+    overlap: 'none',
     bars: 16,
     blurb: 'High-pass build, a beat of daylight, and the new track lands on the 1.',
     lanes: [
@@ -279,6 +296,7 @@ export const TRANSITIONS = {
   buildRelease: {
     label: 'Build & release',
     energy: 'climax',
+    overlap: 'brief',
     bars: 24,
     blurb: 'A long lift on the outgoing track that breaks open into the new one.',
     enter: (c) => {
@@ -310,6 +328,11 @@ export const TRANSITION_KEYS = Object.keys(TRANSITIONS);
 export const transitionsByEnergy = (energy) =>
   TRANSITION_KEYS.filter((k) => TRANSITIONS[k].energy === energy);
 
+/** Overlap classes, least exposed first. */
+const OVERLAP_RANK = { none: 0, brief: 1, full: 2 };
+
+export const overlapOf = (key) => (TRANSITIONS[key] && TRANSITIONS[key].overlap) || 'full';
+
 /**
  * Choose the flow for a handover.
  *
@@ -325,27 +348,36 @@ export const transitionsByEnergy = (energy) =>
  * @param {number}   o.seconds      how much runway the transition actually has
  * @param {string[]} [o.recent]     keys used recently, avoided where possible
  * @param {number}   [o.markedRate] 0..1 chance of a marked seam (default 0.25)
+ * @param {'full'|'brief'|'none'} [o.maxOverlap] how much the two tracks may be
+ *   heard together. Set below 'full' when their keys clash: a long blend of two
+ *   tracks a tritone apart is the one transition that is simply wrong, however
+ *   well it is executed, and no amount of EQ rescues it.
  * @param {() => number} [o.rng]
  */
-export function pickTransition({ liveBpm, idleBpm, seconds, recent = [], markedRate = 0.25, rng = Math.random } = {}) {
+export function pickTransition({ liveBpm, idleBpm, seconds, recent = [], markedRate = 0.25, maxOverlap = 'full', rng = Math.random } = {}) {
   const jump = (idleBpm || 0) - (liveBpm || 0);
   // A clear step up in tempo is the cue for a build. Below that, a climax would
   // be arriving unannounced and just sounds like the mix tripped over.
   const wantsClimax = liveBpm > 0 && idleBpm > 0 && jump >= 4;
 
-  let pool = wantsClimax
+  const limit = OVERLAP_RANK[maxOverlap] ?? OVERLAP_RANK.full;
+  const quiet = (k) => OVERLAP_RANK[overlapOf(k)] <= limit;
+  // Never pick a flow that does not fit in the runway — a 32-bar blend crammed
+  // into 6 seconds is where the hectic feeling comes from.
+  const fits = (k) => !seconds || minSecondsFor(TRANSITIONS[k], liveBpm) <= seconds;
+  const ok = (k) => quiet(k) && fits(k);
+
+  const preferred = wantsClimax
     ? transitionsByEnergy('climax')
     : rng() < markedRate
       ? transitionsByEnergy('marked')
       : transitionsByEnergy('smooth');
 
-  // Never pick a flow that does not fit in the runway — a 32-bar blend crammed
-  // into 6 seconds is where the hectic feeling comes from.
-  const fits = (k) => !seconds || minSecondsFor(TRANSITIONS[k], liveBpm) <= seconds;
-  const fitting = pool.filter(fits);
-  if (fitting.length) pool = fitting;
-  else pool = TRANSITION_KEYS.filter(fits);
-  // Nothing fits: take the shortest thing there is rather than stalling.
+  // Energy class is a preference; the runway and the overlap limit are not.
+  let pool = preferred.filter(ok);
+  if (!pool.length) pool = TRANSITION_KEYS.filter(ok);
+  // Nothing fits: the cut is the shortest flow there is and the least exposed,
+  // so it satisfies both constraints whatever they were.
   if (!pool.length) pool = ['cut'];
 
   const fresh = pool.filter((k) => !recent.includes(k));
