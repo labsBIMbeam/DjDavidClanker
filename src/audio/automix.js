@@ -10,6 +10,8 @@
  * Driven from the frame loop via `tick(dt)` — no timers of its own.
  */
 
+import { TRANSITIONS, Transition, pickTransition, minSecondsFor } from './transitions.js';
+
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
 export class Automix {
@@ -29,9 +31,26 @@ export class Automix {
     this.onStatus = onStatus || (() => {});
 
     this.enabled = false;
-    this.fadeSeconds = 12;
+    /**
+     * Runway handed to a transition, not its length — the chosen flow decides
+     * how long it actually wants. Generous by default: the common complaint is
+     * a mix that feels rushed, and every flow here reads better with room.
+     */
+    this.fadeSeconds = 26;
     this.syncTempo = true;
     this.shuffle = false;
+
+    /**
+     * How often a handover is allowed an audible seam (cut, echo out, spinback)
+     * rather than an invisible blend. All blends goes flat, all cuts is
+     * exhausting; a quarter marked is roughly what a set sounds like. Climaxes
+     * are not in this budget — they are earned by the music, see pickTransition.
+     */
+    this.markedRate = 0.25;
+
+    /** Recently used flows, so the same move does not come round twice. */
+    this._recentFlows = [];
+    this.lastFlow = '';
 
     /**
      * Normally exactly one deck is live and a second running deck is stopped,
@@ -49,7 +68,7 @@ export class Automix {
     this.history = [];
 
     this.liveId = null; // 'A' | 'B'
-    this.fade = null; // { t, dur, from, to }
+    this.fade = null; // a Transition while a handover is in flight
     this.busy = false; // a load is in flight
     this.pending = null; // track staged on the idle deck
     this.lastError = '';
@@ -133,6 +152,9 @@ export class Automix {
   stop() {
     if (!this.enabled) return;
     this.enabled = false;
+    // Switching automix off mid-flow must not strand an EQ or a filter where
+    // the transition left it — hand the controls back before letting go.
+    if (this.fade) this.fade.finish();
     this.fade = null;
     this._coldStart = false;
     this.onStatus('off');
@@ -213,22 +235,54 @@ export class Automix {
     }
   }
 
-  _beginFade(live, idle, dur) {
+  /**
+   * Start a handover.
+   *
+   * `dur` is the runway available, not the length of the move: the chosen flow
+   * declares how many bars it wants and we give it that much if it fits, so a
+   * 32-bar blend does not get compressed into six frantic seconds. If the flow
+   * is shorter than the runway the transition simply starts later, which is
+   * what a person does.
+   */
+  _beginFade(live, idle, dur, forceKey) {
     this._ensureSync(live, idle);
     // A deck coming off a transition sits at the end of its track. Playing it
     // from there is silence, so rewind to the cue before the fader opens.
     if (idle.position >= idle.duration - 0.25) idle.seek(idle.cuePoint || 0);
     if (!idle.playing) idle.play();
-    this.fade = {
-      t: 0,
-      dur: Math.max(1, dur),
+
+    const runway = Math.max(1, dur);
+    const key = forceKey || pickTransition({
+      liveBpm: live.effectiveBpm || live.bpm || 0,
+      idleBpm: idle.effectiveBpm || idle.bpm || 0,
+      seconds: runway,
+      recent: this._recentFlows,
+      markedRate: this.markedRate,
+    });
+
+    const want = minSecondsFor(TRANSITIONS[key] || TRANSITIONS.longBlend, live.effectiveBpm || live.bpm || 0);
+    this.fade = new Transition(key, {
+      live,
+      idle,
+      dur: Math.min(runway, want),
       from: this.mixer.crossfader,
       to: idle.id === 'A' ? -1 : 1,
-    };
+      setXf: (v) => {
+        this.mixer.setCrossfader(v);
+        this.onCrossfade(v);
+      },
+    });
+
+    this._recentFlows.push(key);
+    if (this._recentFlows.length > 4) this._recentFlows.shift();
+    this.lastFlow = key;
     this.onStatus('fading');
   }
 
   _finishFade(live, idle) {
+    // finish() hands back every EQ and filter the flow borrowed. Without it a
+    // transition that ends mid-sweep leaves a deck parked under a low-pass.
+    this.fade.finish();
     this.mixer.setCrossfader(this.fade.to);
     this.onCrossfade(this.fade.to);
     this.fade = null;
@@ -280,15 +334,11 @@ export class Automix {
     const live = this.liveDeck;
     const idle = this.idleDeck;
 
-    // Mid-transition: ride the crossfader.
+    // Mid-transition: the flow owns the fader and the EQs until it is done.
     if (this.fade) {
-      this.fade.t += dt;
-      const k = clamp(this.fade.t / this.fade.dur, 0, 1);
-      const v = this.fade.from + (this.fade.to - this.fade.from) * k;
-      this.mixer.setCrossfader(v);
-      this.onCrossfade(v);
+      const done = this.fade.tick(dt);
       this._ensureSync(idle, live) || this._ensureSync(live, idle);
-      if (k >= 1) this._finishFade(live, idle);
+      if (done) this._finishFade(live, idle);
       return;
     }
 
@@ -349,7 +399,10 @@ export class Automix {
   describe() {
     if (!this.enabled) return { label: 'OFF', detail: '' };
     if (this.busy) return { label: 'LOADING', detail: this.pending ? `${this.pending.artist} – ${this.pending.title}` : '' };
-    if (this.fade) return { label: 'CROSSFADING', detail: `${Math.max(0, this.fade.dur - this.fade.t).toFixed(0)} s` };
+    if (this.fade) {
+      const d = this.fade.describe();
+      return { label: d.label.toUpperCase(), detail: `${d.remaining.toFixed(0)} s` };
+    }
     if (!this.liveId) return { label: 'READY', detail: `${this.remainingInQueue} tracks queued` };
     const idle = this.idleDeck;
     const left = this.remaining;

@@ -29,6 +29,80 @@ const SCRATCH_SET = ['baby', 'forward', 'stab', 'chirp', 'flare1', 'flare2', 'fl
 
 const LOOP_BEATS = [4, 2, 1, 1, 0.5, 0.5, 0.25];
 
+/**
+ * Moods — how busy the performer is while a track plays, and with what.
+ *
+ * One is chosen per track and held for its duration, which is what stops the
+ * mix feeling like a slot machine: a track gets a character and keeps it,
+ * instead of every bar rolling independently across the whole gesture set.
+ *
+ * `intensity` is the chance a given bar gets anything at all, `holds` the
+ * ceiling on concurrent gestures. The weights are relative, not percentages.
+ *
+ * Deliberately weighted toward the quiet end. `busy` and `peak` exist so a long
+ * set has somewhere to go, but they are rare by design — see pickMood().
+ */
+export const MOODS = {
+  minimal: {
+    label: 'Minimal', intensity: 0.1, holds: 1,
+    weights: { blend: 3, fadeRide: 1, filterSweep: 2, bandIsolate: 1 },
+  },
+  breathe: {
+    label: 'Breathe', intensity: 0.16, holds: 1,
+    weights: { blend: 4, filterSweep: 3, bandIsolate: 1, fadeRide: 1 },
+  },
+  filterDrift: {
+    label: 'Filter drift', intensity: 0.22, holds: 1,
+    weights: { filterSweep: 6, blend: 3, bandIsolate: 1 },
+  },
+  dubEcho: {
+    label: 'Dub echo', intensity: 0.24, holds: 2,
+    weights: { fxBurst: 5, filterSweep: 2, blend: 2, bandIsolate: 1 },
+  },
+  bandPlay: {
+    label: 'Band play', intensity: 0.26, holds: 2,
+    weights: { bandIsolate: 5, blend: 3, filterSweep: 2 },
+  },
+  blendFocus: {
+    label: 'Blend focus', intensity: 0.28, holds: 2,
+    weights: { blend: 6, fadeRide: 3, filterSweep: 1 },
+  },
+  loopPlay: {
+    label: 'Loop play', intensity: 0.3, holds: 2,
+    weights: { loopRoll: 4, blend: 3, filterSweep: 2, fxBurst: 1 },
+  },
+  faderRide: {
+    label: 'Fader ride', intensity: 0.32, holds: 2,
+    weights: { fadeRide: 4, faderChop: 3, blend: 3, filterSweep: 1 },
+  },
+  busy: {
+    label: 'Busy', intensity: 0.45, holds: 2,
+    weights: { blend: 3, fadeRide: 2, faderChop: 2, filterSweep: 2, bandIsolate: 2, fxBurst: 2, loopRoll: 1 },
+  },
+  peak: {
+    label: 'Peak', intensity: 0.6, holds: 3,
+    weights: { faderChop: 3, loopRoll: 3, fxBurst: 3, scratchBurst: 2, bandIsolate: 2, blend: 2, fadeRide: 1 },
+  },
+};
+
+export const MOOD_KEYS = Object.keys(MOODS);
+
+/** The calm ones, which is nearly all of them. */
+const CALM_MOODS = MOOD_KEYS.filter((k) => MOODS[k].intensity <= 0.32);
+
+/**
+ * Pick a mood for a track. Busy and peak only come out when the track itself is
+ * driving harder than what came before — the same rule the transitions use, so
+ * the energy of the set is decided by the music rather than by dice.
+ */
+export function pickMood({ bpm = 0, prevBpm = 0, recent = [], rng = Math.random } = {}) {
+  const lively = bpm > 0 && prevBpm > 0 && bpm - prevBpm >= 4;
+  const pool = lively && rng() < 0.6 ? ['busy', 'peak'] : CALM_MOODS;
+  const fresh = pool.filter((k) => !recent.includes(k));
+  const from = fresh.length ? fresh : pool;
+  return from[Math.floor(rng() * from.length) % from.length];
+}
+
 export class Performer {
   /**
    * @param {import('./engine.js').Mixer} mixer
@@ -41,8 +115,18 @@ export class Performer {
     this.onCrossfade = onCrossfade; // keep the visible fader in step
 
     this.enabled = false;
-    /** 0 = occasional garnish, 1 = something happening on every bar. */
-    this.intensity = 0.85;
+    /**
+     * Global scale on top of the mood, 0..1. The mood decides the character;
+     * this is the master "how much" if you want the whole thing quieter still.
+     */
+    this.intensity = 1;
+
+    /** Current mood, re-picked whenever the live track changes. */
+    this.mood = 'breathe';
+    this._recentMoods = [];
+    this._moodTrackId = null;
+    this._moodBar = 0;
+    this._prevBpm = 0;
 
     this._clock = 0;
     this._nextBar = 0;
@@ -375,31 +459,74 @@ export class Performer {
     const live = this.liveDeck;
     if (!this._usable(live)) return;
 
-    // Intensity is the chance that this bar gets anything at all.
-    if (Math.random() > this.intensity) return;
-    // Do not stack indefinitely; two concurrent gestures is already a lot.
-    if (this._holds.length >= 3) return;
+    this._syncMood(live);
+    const mood = MOODS[this.mood] || MOODS.breathe;
 
     // Keep the decks locked to each other every couple of bars regardless of
     // what else happens — alignment is upkeep, not a gesture.
     if (this._bar % 2 === 0) this._align();
 
-    // Weighted toward the two-deck work: blending, riding the fader and
-    // staying aligned. Scratching is a garnish here, not the main event.
-    const roll = Math.random();
-    if (roll < 0.3) this._blend(4);
-    else if (roll < 0.48) this._fadeRide(4);
-    else if (roll < 0.6) this._faderChop(1);
-    else if (roll < 0.72) this._filterSweep(live, 2);
-    else if (roll < 0.82) this._bandIsolate(2);
-    else if (roll < 0.92) this._fxBurst(Math.random() < 0.6 ? live : this.otherDeck, 2);
-    else if (roll < 0.97) this._loopRoll(live, 1);
-    else this._scratchBurst(live, 1);
+    // The mood decides how often anything happens at all. This is the single
+    // biggest lever on whether the mix feels composed or frantic.
+    if (Math.random() > mood.intensity * this.intensity) return;
+    if (this._holds.length >= mood.holds) return;
+
+    // Never start a gesture on top of a handover — the transition is already
+    // the event, and piling a scratch onto it is exactly the hectic feeling.
+    if (this.automix && this.automix.fade) return;
+
+    const gesture = this._rollGesture(mood.weights);
+    switch (gesture) {
+      case 'blend': return this._blend(8);
+      case 'fadeRide': return this._fadeRide(8);
+      case 'faderChop': return this._faderChop(1);
+      case 'filterSweep': return this._filterSweep(live, 4);
+      case 'bandIsolate': return this._bandIsolate(2);
+      case 'fxBurst': return this._fxBurst(Math.random() < 0.6 ? live : this.otherDeck, 4);
+      case 'loopRoll': return this._loopRoll(live, 1);
+      case 'scratchBurst': return this._scratchBurst(live, 1);
+      default: return undefined;
+    }
+  }
+
+  /**
+   * Re-pick the mood when the live track changes, and hold it for that track —
+   * a track keeps one character instead of every bar rolling independently.
+   *
+   * Falls back to a bar timer when the deck has no track identity, so the
+   * performer can never end up locked in a single mood for a whole set.
+   */
+  _syncMood(live) {
+    const id = live.track && live.track.id;
+    const changed = id ? id !== this._moodTrackId : this._bar - this._moodBar >= 32;
+    if (!changed) return;
+    const bpm = live.effectiveBpm || live.bpm || 0;
+    this.mood = pickMood({ bpm, prevBpm: this._prevBpm, recent: this._recentMoods });
+    this._recentMoods.push(this.mood);
+    if (this._recentMoods.length > 3) this._recentMoods.shift();
+    this._moodTrackId = id || null;
+    this._moodBar = this._bar;
+    this._prevBpm = bpm;
+  }
+
+  /** Weighted choice over the mood's gesture table. */
+  _rollGesture(weights) {
+    const keys = Object.keys(weights);
+    let total = 0;
+    for (const k of keys) total += weights[k];
+    if (total <= 0) return null;
+    let r = Math.random() * total;
+    for (const k of keys) {
+      r -= weights[k];
+      if (r <= 0) return k;
+    }
+    return keys[keys.length - 1];
   }
 
   describe() {
     if (!this.enabled) return { label: 'OFF', detail: '' };
     const now = this._holds.map((h) => h.label).join(' + ');
-    return { label: 'PERFORMING', detail: now || `bar ${this._bar}` };
+    const mood = (MOODS[this.mood] || MOODS.breathe).label;
+    return { label: mood.toUpperCase(), detail: now || `bar ${this._bar}` };
   }
 }

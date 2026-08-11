@@ -13,7 +13,7 @@
  *   node dev/performer-check.mjs
  */
 
-import { Performer } from '../src/audio/performer.js';
+import { Performer, MOODS, MOOD_KEYS, pickMood } from '../src/audio/performer.js';
 
 const results = [];
 const check = (name, ok, detail = '') => {
@@ -249,6 +249,48 @@ check('crossfader work outweighs scratching', fader > scratch * 3,
   `${Object.entries(census).map(([k, v]) => `${k}:${v}`).join(' ') || 'nothing'}`);
 check('blending happens regularly', (census.blend || 0) > 0,
   `${census.blend || 0} blends in 30 simulated minutes`);
+
+/* -------------------------------- moods -------------------------------- */
+
+// A mood is held for a whole track and decides how busy the performer is. The
+// point of having ten is that a long set does not sound like one setting, so
+// "they rotate" and "they stay calm by default" are both load-bearing.
+
+check('there are ten moods', MOOD_KEYS.length === 10, `${MOOD_KEYS.length}: ${MOOD_KEYS.join(', ')}`);
+
+{
+  const seen = new Set();
+  const recent = [];
+  for (let i = 0; i < 300; i++) {
+    const m = pickMood({ bpm: 124, prevBpm: 124, recent });
+    seen.add(m);
+    recent.push(m);
+    if (recent.length > 3) recent.shift();
+  }
+  check('a flat set still rotates through the calm moods', seen.size >= 6,
+    `${seen.size} distinct: ${[...seen].join(', ')}`);
+  const loud = [...seen].filter((m) => MOODS[m].intensity > 0.32);
+  check('a flat set never escalates on its own', loud.length === 0, loud.join(', ') || 'all calm');
+}
+
+{
+  // Only a genuine step up in tempo unlocks the busy end.
+  let escalated = 0;
+  for (let i = 0; i < 300; i++) {
+    const m = pickMood({ bpm: 134, prevBpm: 124, recent: [] });
+    if (MOODS[m].intensity > 0.32) escalated++;
+  }
+  check('a tempo jump does escalate, but not every time',
+    escalated > 60 && escalated < 260, `${escalated}/300`);
+}
+
+{
+  // The calm default is the whole "not hectic" requirement, in one number.
+  const avg = MOOD_KEYS.reduce((s, k) => s + MOODS[k].intensity, 0) / MOOD_KEYS.length;
+  check('moods are calm on average', avg < 0.35, `mean intensity ${avg.toFixed(2)}`);
+  const maxHolds = Math.max(...MOOD_KEYS.map((k) => MOODS[k].holds));
+  check('nothing stacks more than three gestures', maxHolds <= 3, `max ${maxHolds}`);
+}
 
 const failed = results.filter((r) => !r.ok).length;
 console.log(`\n${results.length - failed}/${results.length} passed`);
