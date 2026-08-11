@@ -324,6 +324,112 @@ export class Echo {
 }
 
 /**
+ * Channel filter with selectable models — the DJ-mixer "one knob, LP left,
+ * HP right" sweep, but with the personality switchable:
+ *
+ *   clean  transparent 2-pole, constant low Q — the original behaviour
+ *   djm    2-pole whose Q rises gently toward the ends — the Pioneer feel
+ *   xone   Allen & Heath Xone:92-style VCF: 4-pole (two cascaded biquads),
+ *          pronounced resonance that grows with the sweep, and a soft
+ *          saturation stage for the analog crunch
+ *
+ * The chain is fixed (f1 → f2 → drive → shaper → post); models that need
+ * less of it make the extra stages transparent (peaking @ 0 dB, null curve),
+ * so switching models never rewires the graph mid-signal.
+ */
+export const FILTER_MODELS = ['clean', 'djm', 'xone'];
+
+export class ChannelFilter {
+  constructor(ctx) {
+    this.ctx = ctx;
+    this.model = 'clean';
+    this.position = 0;
+
+    this.input = ctx.createGain();
+    this.output = ctx.createGain();
+    this.f1 = ctx.createBiquadFilter();
+    this.f2 = ctx.createBiquadFilter();
+    this.drive = ctx.createGain();
+    this.shaper = ctx.createWaveShaper();
+    this.post = ctx.createGain();
+
+    this.f1.type = 'lowpass';
+    this.f1.frequency.value = 22050;
+    this.f1.Q.value = 0.7;
+    this.f2.type = 'peaking';
+    this.f2.frequency.value = 1000;
+    this.f2.gain.value = 0;
+
+    // tanh soft clipper, normalized so full drive stays inside ±1.
+    const N = 1024;
+    const curve = new Float32Array(N);
+    const K = 2.2;
+    for (let i = 0; i < N; i++) {
+      const x = (i / (N - 1)) * 2 - 1;
+      curve[i] = Math.tanh(K * x) / Math.tanh(K);
+    }
+    this._curve = curve;
+    this.shaper.curve = null; // identity until the xone model wants crunch
+
+    this.input.connect(this.f1).connect(this.f2).connect(this.drive)
+      .connect(this.shaper).connect(this.post).connect(this.output);
+  }
+
+  setModel(model) {
+    if (!FILTER_MODELS.includes(model)) return;
+    this.model = model;
+    this._apply();
+  }
+
+  setPosition(v) {
+    this.position = clamp(v, -1, 1);
+    this._apply();
+  }
+
+  _apply() {
+    const v = this.position;
+    const x = Math.abs(v);
+    const neutral = x <= 0.02;
+    const xone = this.model === 'xone';
+
+    // Frequency mapping shared by all models (the original sweep curve).
+    let type = 'lowpass';
+    let freq = 22050;
+    if (!neutral && v < 0) freq = 22050 * Math.pow(180 / 22050, x);
+    if (!neutral && v > 0) {
+      type = 'highpass';
+      freq = 20 * Math.pow(8000 / 20, x);
+    }
+
+    const q = neutral || this.model === 'clean' ? 0.7
+      : this.model === 'djm' ? 0.7 + 0.8 * Math.pow(x, 1.3)
+      : 0.55 + 1.5 * Math.pow(x, 0.9); // xone: resonance rides the sweep
+
+    this.f1.type = type;
+    this.f1.frequency.value = freq;
+    this.f1.Q.value = q;
+
+    if (xone && !neutral) {
+      // Second pole pair at the same corner → 24 dB/oct with a resonant hump.
+      this.f2.type = type;
+      this.f2.frequency.value = freq;
+      this.f2.Q.value = q * 0.8;
+      this.shaper.curve = this._curve;
+      this.drive.gain.value = 1 + 1.6 * x;
+      this.post.gain.value = 1 / (1 + 0.6 * x);
+    } else {
+      this.f2.type = 'peaking';
+      this.f2.frequency.value = 1000;
+      this.f2.Q.value = 0.7;
+      this.f2.gain.value = 0;
+      this.shaper.curve = null;
+      this.drive.gain.value = 1;
+      this.post.gain.value = 1;
+    }
+  }
+}
+
+/**
  * Convolution reverb on a generated exponential-decay noise impulse — no
  * sample assets, which matters in a single-file napplet.
  */
@@ -360,9 +466,15 @@ export class Reverb {
     const buf = this.ctx.createBuffer(2, len, sr);
     for (let c = 0; c < 2; c++) {
       const d = buf.getChannelData(c);
+      let lp = 0;
       for (let i = 0; i < len; i++) {
-        // -60 dB by the end of the tail.
-        d[i] = (Math.random() * 2 - 1) * Math.pow(10, (-3 * i) / len);
+        // -60 dB by the end of the tail, with progressive damping: a one-pole
+        // lowpass that closes along the tail, the way air eats the highs of a
+        // real room. Bare white noise reads as "fizz", not as space.
+        const white = Math.random() * 2 - 1;
+        const a = 0.1 + 0.8 * (i / len);
+        lp += (white - lp) * (1 - a);
+        d[i] = lp * Math.pow(10, (-3 * i) / len) * 2.2;
       }
     }
     this.conv.buffer = buf;
