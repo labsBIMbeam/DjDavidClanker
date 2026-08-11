@@ -187,8 +187,26 @@ two cases apart.
 `node dev/smoke.mjs` drives the real app in the real sandboxed iframe against
 the real Wavlake API. No mocks except the Nostr fixture. Last run: **40/40**,
 plus the sibling suites `fx-sync-check` (48), `automix-check` (5),
-`macro-check` (24), `autodj-check` (33), `playlist-check` (9) and
-`local-check` (7) — 166 checks in total.
+`macro-check` (24), `autodj-check` (37), `playlist-check` (9) and
+`local-check` (7) — 170 checks in total.
+
+**Auto-DJ UI** (milestone 4): sections tint the bottom strip of both
+waveform render paths, phrase-start bar lines glow, mix-in/mix-out show as
+dashed ▸/◂ markers; the deck head carries a Camelot badge (dimmed under 0.4
+confidence); the automix bar has the AUTO/BLEND/CUT/ECHO/FADE style cycle and
+the LIST/SHUF/SMART order cycle; browser rows show a "124 · 8B" chip once a
+track's analysis is cached.
+
+**Honest limits of the Auto-DJ:** the downbeat vote still sometimes picks
+beat 3 as bar-1 (phrase overlays then sit visibly two beats off; mixes stay
+on the grid — TAP/BASE remains the manual override). Sections and phrases
+are heuristics tuned for 4/4 electronic material; ambient, rubato or DJ-tool
+input degrades to the legacy fade via the confidence gate. Key detection is a
+chromagram template match, not transcription — report says 82% confidence on
+a clean fixture, expect less on dense mixes. And two of the transition-timing
+checks are load-sensitive on a busy machine: they assert real sub-5 ms
+scheduling, and a starved event loop can miss the observation window — rerun
+before believing a single red.
 
 **Smart selection** (milestone 3): the automix `order` is
 `list | shuffle | smart` (SMART is the default; the old `shuffle` boolean

@@ -44,6 +44,16 @@ export function AutomixBar(automix, { onQueueFromBrowser }) {
   };
   const btnSync = toggle('SYNC', () => automix.syncTempo, (v) => { automix.syncTempo = v; }, 'Pull the next deck onto the BPM before the transition');
 
+  const STYLES = ['auto', 'blend', 'cut', 'echo', 'fade'];
+  const btnStyle = h('button', {
+    class: 'btn btn-mini',
+    title: 'Transition style: AUTO picks per pair · BLEND phrase-aligned bass swap · CUT on the phrase · ECHO tail exit · FADE legacy crossfade',
+    onclick: () => {
+      automix.transitionStyle = STYLES[(STYLES.indexOf(automix.transitionStyle) + 1) % STYLES.length];
+      render();
+    },
+  }, 'AUTO');
+
   const ORDER_LABELS = { list: 'LIST', shuffle: 'SHUF', smart: 'SMART' };
   const ORDERS = ['list', 'shuffle', 'smart'];
   const btnOrder = h('button', {
@@ -67,6 +77,7 @@ export function AutomixBar(automix, { onQueueFromBrowser }) {
       btnNext,
       btnLoad,
       h('div', { class: 'am-fade-box' }, h('span', { class: 'fx-lbl' }, 'Fade'), fadeFader, fadeVal),
+      btnStyle,
       btnSync,
       btnOrder,
     ),
@@ -77,6 +88,8 @@ export function AutomixBar(automix, { onQueueFromBrowser }) {
     btnOn.textContent = automix.enabled ? '■ AUTOMIX' : '▶▶ AUTOMIX';
     btnNext.disabled = !automix.enabled;
     btnSync._sync();
+    btnStyle.textContent = (automix.transitionStyle || 'auto').toUpperCase();
+    btnStyle.classList.toggle('on', automix.transitionStyle !== 'auto');
     btnOrder.textContent = ORDER_LABELS[automix.order] || 'LIST';
     btnOrder.classList.toggle('on', automix.order !== 'list');
     root.classList.toggle('active', automix.enabled);

@@ -447,6 +447,44 @@ check('preanalyzer caches BPM and key without touching a deck',
   && pre.deckA === preSetup.deckA && pre.deckB === preSetup.deckB,
   `bpm=${pre.bpm} decks ${pre.deckA}/${pre.deckB}`);
 
+/* ----------------------------- part 4: UI ----------------------------- */
+
+const ui = await frame.evaluate(() => {
+  const dj = window.__djclanker;
+  const keyA = document.querySelector('.deck-top.deck-A .badge-key');
+  const styleBtns = [...document.querySelectorAll('.automix .btn-mini')];
+  const styleBtn = styleBtns.find((b) => b.textContent === 'AUTO');
+  const before = dj.automix.transitionStyle;
+  if (styleBtn) styleBtn.click();
+  const after = dj.automix.transitionStyle;
+  dj.automix.transitionStyle = 'auto';
+  const orderBtn = styleBtns.find((b) => ['LIST', 'SHUF', 'SMART'].includes(b.textContent));
+  return {
+    keyBadge: keyA ? keyA.textContent : null,
+    keyVisible: keyA ? keyA.style.display !== 'none' : false,
+    styleBefore: before,
+    styleAfter: after,
+    orderLabel: orderBtn ? orderBtn.textContent : null,
+  };
+});
+check('deck head shows the Camelot key badge', ui.keyVisible && ui.keyBadge === '8B',
+  `${ui.keyBadge}`);
+check('transition style button cycles AUTO → BLEND',
+  ui.styleBefore === 'auto' && ui.styleAfter === 'blend');
+check('order button reflects the SMART default', ui.orderLabel === 'SMART',
+  `${ui.orderLabel}`);
+
+// Cached tracks get a "BPM · key" chip once the list re-renders.
+await frame.locator('.tab', { hasText: 'Crate' }).click();
+await frame.locator('.side-group .btn-ghost', { hasText: 'Show local files' }).click();
+const chip = await frame.evaluate(() => {
+  const rows = [...document.querySelectorAll('.track-row')];
+  const alpha = rows.find((r) => r.textContent.includes('Alpha'));
+  const el = alpha && alpha.querySelector('.row-keybpm');
+  return el ? el.textContent : null;
+});
+check('browser row carries the analyzed BPM · key chip', chip === '124 · 8B', `${chip}`);
+
 await page.screenshot({ path: `${OUT}-analysis.png`, fullPage: true });
 await browser.close();
 

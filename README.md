@@ -66,13 +66,26 @@ network access to a host shell.
   `BARS` (spectrum, logarithmically binned — linear FFT bins would otherwise
   waste almost the whole width on the highs)
 
-**Automix**
-- One button and the box keeps going: the next track is loaded onto the free
-  deck in time, pulled to the BPM and crossfaded during the outro
-- The queue comes from the current browser list (`⤓ List`), crossfade time
-  2–45 s, SYNC and SHUFFLE individually switchable, `⏭` fades right now
-- **Never** touches the audio graph — uses the same deck and mixer methods
-  as the buttons, so you can cut in at any time
+**Auto-DJ**
+- One button and the box mixes like a DJ, not like a jukebox: every track is
+  analyzed for structure (intro/high/breakdown/outro), 16/32-bar phrases,
+  mix-in/mix-out points and musical key (Camelot) — cached, so known tracks
+  are instant
+- Transitions are planned per pair: **BLEND** starts the next track
+  sample-accurately on a phrase boundary at its mix-in point, kills its bass
+  until the bass-swap phrase, keeps the phase latched and eases the
+  crossfader; **ECHO** rides a dub tail out when the tempo gap is unreachable;
+  **CUT** drops on the phrase when a track ends hot; **FADE** is the old
+  crossfade and remains the fallback for anything uncertain
+- After every handover the tempo glides back to 0 % — a set never drifts
+  sharp over the night
+- **SMART order** picks the next track by key compatibility, BPM closeness
+  and energy continuity (LIST and SHUF still available); a background
+  preanalyzer fills the cache ahead of the set
+- Structure, phrase lines and mix points are drawn on the waveform; decks and
+  browser rows show the key badge
+- The machine **yields instantly** the moment you touch a control it is
+  driving — grab the fader mid-blend and it is yours
 - Switching it on mid-set adopts the running deck instead of starting over
 
 **Mixer**

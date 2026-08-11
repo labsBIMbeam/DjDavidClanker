@@ -4,6 +4,17 @@ import { loadPlaylists, resolvePlaylist } from '../lib/nostr.js';
 import { store } from '../lib/nap.js';
 import { setImage } from '../lib/artwork.js';
 import { trackFromFile } from '../lib/localtracks.js';
+import { getAnalysis, trackCacheId } from '../lib/analysiscache.js';
+import { camelotFor } from '../audio/analyze.js';
+
+/** "124 · 8B" chip when the track's analysis is cached; null otherwise. */
+function keyBpmChip(t) {
+  const e = getAnalysis(trackCacheId(t));
+  if (!e || !(e.bpm > 0)) return null;
+  const cam = e.k && e.k[0] >= 0 ? camelotFor(e.k[0], e.k[1] === 0 ? 'major' : 'minor') : '';
+  return h('span', { class: 'row-keybpm', title: 'Analyzed: BPM · Camelot key' },
+    `${Math.round(e.bpm)}${cam ? ` · ${cam}` : ''}`);
+}
 
 const CRATE_KEY = 'crate.v1';
 
@@ -258,8 +269,9 @@ export function Browser({ onLoadDeck, onZap, capabilities }) {
         h('div', { class: 'row-artist' }, t.artist),
       ),
       h('div', { class: 'row-stats' },
+        keyBpmChip(t),
         h('span', { class: 'row-dur' }, fmtTime(t.duration)),
-        t.sats7d ? h('span', { class: 'row-sats', title: 'Sats letzte 7 Tage' }, `⚡${fmtSats(t.sats7d)}`) : null,
+        t.sats7d ? h('span', { class: 'row-sats', title: 'Sats over the last 7 days' }, `⚡${fmtSats(t.sats7d)}`) : null,
       ),
       h('div', { class: 'row-actions' },
         h('button', {
