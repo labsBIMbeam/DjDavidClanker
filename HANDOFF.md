@@ -187,8 +187,19 @@ two cases apart.
 `node dev/smoke.mjs` drives the real app in the real sandboxed iframe against
 the real Wavlake API. No mocks except the Nostr fixture. Last run: **40/40**,
 plus the sibling suites `fx-sync-check` (48), `automix-check` (5),
-`macro-check` (24), `autodj-check` (27), `playlist-check` (9) and
-`local-check` (7) — 160 checks in total.
+`macro-check` (24), `autodj-check` (33), `playlist-check` (9) and
+`local-check` (7) — 166 checks in total.
+
+**Smart selection** (milestone 3): the automix `order` is
+`list | shuffle | smart` (SMART is the default; the old `shuffle` boolean
+survives as an alias). Smart scores the next 12 queue candidates against the
+live deck — 0.4·BPM-fold-closeness + 0.3·Camelot compatibility +
+0.2·energy continuity + 0.1, minus a recency penalty — using cached
+analysis; anything uncached scores neutral, so a cold cache IS list order.
+`src/audio/preanalyze.js` fills that cache in the background: strictly
+sequential (one decode in memory at a time), stands down while a deck loads,
+remembers failures. It is poked from the frame loop every 8 s while the
+automix runs in smart order.
 
 **Auto-DJ v2** (milestones 1+2 of the plan). The deck knows the track:
 `analyzeStructure` (per-bar energy on the beat grid, sections, phrase length

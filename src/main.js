@@ -15,6 +15,9 @@ import { hexToNpub } from './lib/bech32.js';
 import { trackFromFile } from './lib/localtracks.js';
 import { initCache } from './lib/analysiscache.js';
 import { planTransition } from './audio/transition.js';
+import { createPreanalyzer } from './audio/preanalyze.js';
+import { camelotScore, bpmFoldScore, energyScore, scoreCandidate, summaryFor } from './audio/selection.js';
+import { trackCacheId, getAnalysis } from './lib/analysiscache.js';
 
 // Warm the analysis cache early — loads race it, and a miss only costs a
 // re-analysis, so fire-and-forget is fine.
@@ -493,14 +496,22 @@ if (media) {
     .catch(() => { /* host does not really support media */ });
 }
 
+const preanalyzer = createPreanalyzer(mixer, automix);
+
 // Debug handle: the napplet is alone in its sandbox, and having the live mixer
 // reachable makes the platter/FX behaviour testable from the outside — and
 // drivable: dev/live-dj.mjs runs a whole set through this handle.
-window.__djclanker = { mixer, decks: mixer.decks, settings, automix, browser, toast, planTransition };
+window.__djclanker = {
+  mixer, decks: mixer.decks, settings, automix, browser, toast, planTransition,
+  preanalyzer,
+  selection: { camelotScore, bpmFoldScore, energyScore, scoreCandidate, summaryFor },
+  analysisCache: { trackCacheId, getAnalysis },
+};
 
 /* ------------------------------ loop ------------------------------ */
 
 let lastFrame = 0;
+let lastPoke = 0;
 function frame(now) {
   const dt = lastFrame ? Math.min(0.25, (now - lastFrame) / 1000) : 0;
   lastFrame = now;
@@ -510,6 +521,10 @@ function frame(now) {
   panelB.tick();
   strip.tick();
   automixBar.tick();
+  if (now - lastPoke > 8000) {
+    lastPoke = now;
+    preanalyzer.poke(); // background queue analysis for the smart order
+  }
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);

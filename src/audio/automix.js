@@ -11,6 +11,8 @@
  */
 
 import { planTransition, Transition } from './transition.js';
+import { scoreCandidate, summaryFor } from './selection.js';
+import { trackCacheId } from '../lib/analysiscache.js';
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
@@ -33,7 +35,12 @@ export class Automix {
     this.enabled = false;
     this.fadeSeconds = 12;
     this.syncTempo = true;
-    this.shuffle = false;
+    /**
+     * Track order: 'list' plays the queue as-is, 'shuffle' draws randomly,
+     * 'smart' scores candidates on key/BPM/energy continuity against the
+     * live deck (cached analysis; a cold cache degrades to list order).
+     */
+    this.order = 'smart';
     /** 'auto' | 'blend' | 'cut' | 'echo' | 'fade' — what the planner may pick. */
     this.transitionStyle = 'auto';
     /** Off = always the legacy crossfade, whatever the analysis says. */
@@ -85,6 +92,15 @@ export class Automix {
     return Math.max(0, this.queue.length - this.cursor);
   }
 
+  /** Kept for callers of the old boolean API. */
+  get shuffle() {
+    return this.order === 'shuffle';
+  }
+
+  set shuffle(v) {
+    this.order = v ? 'shuffle' : 'list';
+  }
+
   _takeNext() {
     if (this.cursor >= this.queue.length) {
       const more = this.refill() || [];
@@ -97,7 +113,11 @@ export class Automix {
         return null;
       }
     }
-    if (this.shuffle && this.queue.length > 1) {
+    if (this.order === 'smart') {
+      const pick = this._takeSmart();
+      if (pick) return pick;
+    }
+    if (this.order === 'shuffle' && this.queue.length > 1) {
       // Pick at random but never the track that is already live.
       const liveId = this.liveId && this.mixer.decks[this.liveId].track && this.mixer.decks[this.liveId].track.id;
       let pick = null;
@@ -108,6 +128,37 @@ export class Automix {
       return pick || this.queue[this.cursor++];
     }
     return this.queue[this.cursor++] || null;
+  }
+
+  /**
+   * Choose the best continuation among the next candidates. Highest score
+   * wins, ties go to the earlier queue position — so with nothing analyzed
+   * every score is identical and this IS list order.
+   */
+  _takeSmart() {
+    const live = this.liveDeck;
+    if (!live || !live.bpm) return null; // cold start: the list head is fine
+    const liveSummary = {
+      bpm: live.bpm,
+      camelot: live.musicalKey ? live.musicalKey.camelot : '',
+      energyOut: live.structure && live.structure.ok ? live.structure.energyOut : NaN,
+    };
+    const recent = this.history.slice(-20).map((t) => t.id);
+    let bestIdx = -1;
+    let bestScore = -Infinity;
+    const window = Math.min(12, this.queue.length - this.cursor);
+    for (let i = 0; i < window; i++) {
+      const cand = this.queue[this.cursor + i];
+      if (!cand) continue;
+      const s = scoreCandidate(liveSummary, summaryFor(cand), recent, trackCacheId(cand));
+      if (s > bestScore + 1e-9) {
+        bestScore = s;
+        bestIdx = this.cursor + i;
+      }
+    }
+    if (bestIdx < 0) return null;
+    const [pick] = this.queue.splice(bestIdx, 1);
+    return pick || null;
   }
 
   /* ------------------------------ control ------------------------------ */
