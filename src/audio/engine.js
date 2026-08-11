@@ -26,10 +26,13 @@
 import { fetchBlob } from '../lib/nap.js';
 import { detectBpm, waveformPeaks, rms } from './analyze.js';
 import { Turntable, reversedBuffer } from './scratch.js';
-import { Flanger, Gater, Phaser, Echo, Reverb } from './fx.js';
+import { Flanger, Gater, Phaser, Echo, Reverb, ChannelFilter } from './fx.js';
+import { MacroFX } from './macrofx.js';
 
 /** Insert order in the chain — modulation first, gate, then time-based tails. */
 export const FX_TYPES = ['flanger', 'phaser', 'gater', 'echo', 'reverb'];
+export { FILTER_MODELS } from './fx.js';
+export { MACRO_TYPES, MACRO_LABELS } from './macrofx.js';
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
@@ -116,6 +119,10 @@ export class Deck extends Emitter {
     };
     /** Which two units the deck's FX buttons drive. The chain holds all five. */
     this.fxSlots = ['flanger', 'gater'];
+    /** Channel-filter personality: 'clean' | 'djm' | 'xone'. */
+    this.filterModel = 'clean';
+    /** One-knob macro FX (Traktor Mixer FX-style): type + bipolar value. */
+    this.macro = { type: 'echo', value: 0 };
 
     this._mode = 'idle';
     this._buffer = null;
@@ -152,38 +159,42 @@ export class Deck extends Emitter {
     const high = ctx.createBiquadFilter();
     high.type = 'highshelf';
     high.frequency.value = 4000;
-    const filter = ctx.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.frequency.value = 22050;
-    filter.Q.value = 0.7;
+    const filter = new ChannelFilter(ctx);
+    filter.setModel(this.filterModel);
 
     const flanger = new Flanger(ctx);
     const phaser = new Phaser(ctx);
     const gater = new Gater(ctx);
     const echo = new Echo(ctx);
     const reverb = new Reverb(ctx);
+    const macro = new MacroFX(ctx);
 
     const gain = ctx.createGain();
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 1024;
 
-    trim.connect(low).connect(mid).connect(high).connect(filter);
-    filter.connect(flanger.input);
+    trim.connect(low).connect(mid).connect(high).connect(filter.input);
+    filter.output.connect(flanger.input);
     flanger.output.connect(phaser.input);
     phaser.output.connect(gater.input);
     gater.output.connect(echo.input);
     echo.output.connect(reverb.input);
-    reverb.output.connect(gain).connect(analyser);
+    reverb.output.connect(macro.input);
+    macro.output.connect(gain).connect(analyser);
     analyser.connect(this.mixer.crossGain[this.id]);
 
-    // Pre-fader listen: tap after the FX chain but before the volume fader,
-    // so the headphone hears the deck no matter where the faders sit.
+    // Pre-fader listen: tap after the FX chain (macro included) but before
+    // the volume fader, so the headphone hears the deck no matter where the
+    // faders sit.
     const cueSend = ctx.createGain();
     cueSend.gain.value = this.cueOn ? 1 : 0;
-    reverb.output.connect(cueSend);
+    macro.output.connect(cueSend);
     if (this.mixer.cueBus) cueSend.connect(this.mixer.cueBus);
 
-    this._graph = { trim, low, mid, high, filter, flanger, phaser, gater, echo, reverb, gain, analyser, cueSend };
+    macro.setType(this.macro.type);
+    macro.setValue(this.macro.value);
+
+    this._graph = { trim, low, mid, high, filter, flanger, phaser, gater, echo, reverb, macro, gain, analyser, cueSend };
     this._analyseBuf = new Float32Array(analyser.fftSize);
     this._turntable = new Turntable(ctx, trim);
     this._applyMix();
@@ -828,6 +839,7 @@ export class Deck extends Emitter {
       this._graph.gater.set({ bpm });
       this._graph.gater.tick();
       this._graph.echo.set({ bpm });
+      this._graph.macro.tick(bpm);
     }
   }
 
@@ -1131,20 +1143,26 @@ export class Deck extends Emitter {
 
   setFilter(v) {
     this.filter = clamp(v, -1, 1);
-    if (this._graph) {
-      const f = this._graph.filter;
-      if (this.filter < -0.02) {
-        f.type = 'lowpass';
-        f.frequency.value = 22050 * Math.pow(180 / 22050, -this.filter);
-      } else if (this.filter > 0.02) {
-        f.type = 'highpass';
-        f.frequency.value = 20 * Math.pow(8000 / 20, this.filter);
-      } else {
-        f.type = 'lowpass';
-        f.frequency.value = 22050;
-      }
-    }
+    if (this._graph) this._graph.filter.setPosition(this.filter);
     this.emit('mix');
+  }
+
+  setFilterModel(model) {
+    this.filterModel = model;
+    if (this._graph) this._graph.filter.setModel(model);
+    this.emit('mix');
+  }
+
+  setMacroType(type) {
+    this.macro.type = type;
+    if (this._graph) this._graph.macro.setType(type);
+    this.emit('fx');
+  }
+
+  setMacroValue(v) {
+    this.macro.value = clamp(v, -1, 1);
+    if (this._graph) this._graph.macro.setValue(this.macro.value);
+    this.emit('fx');
   }
 
   _applyMix() {

@@ -84,7 +84,8 @@ src/
   audio/
     engine.js           mixer + deck, two backends, platter physics
     scratch.js          granular turntable (overlap-add) + reversed buffer
-    fx.js               5 insert FX: flanger, phaser, gater, echo, reverb
+    fx.js               5 insert FX + ChannelFilter (clean/djm/xone models)
+    macrofx.js          one-knob Macro FX (echo/space/noise/gate/barber)
     automix.js          auto-DJ state machine
     analyze.js          waveform peaks, RMS, BPM v2 (comb autocorrelation + beat phase)
   ui/
@@ -93,8 +94,9 @@ src/
 dev/
   shell.html            minimal NIP-5D host shell
   serve-shell.mjs       static server + fetch proxy
-  smoke.mjs             Playwright E2E (40 checks; four sibling suites exist)
+  smoke.mjs             Playwright E2E (40 checks; five sibling suites exist)
   automix-check.mjs     three tracks in a row — guards the second handover
+  macro-check.mjs       Macro FX + filter models against the live graph
 ```
 
 A single `requestAnimationFrame` loop in `main.js` drives everything:
@@ -184,7 +186,29 @@ two cases apart.
 `node dev/smoke.mjs` drives the real app in the real sandboxed iframe against
 the real Wavlake API. No mocks except the Nostr fixture. Last run: **40/40**,
 plus the sibling suites `fx-sync-check` (48), `automix-check` (5),
-`playlist-check` (9) and `local-check` (7) — 109 checks in total.
+`macro-check` (20), `playlist-check` (9) and `local-check` (7) — 129 checks
+in total.
+
+**Macro FX** (`src/audio/macrofx.js`) is the Traktor "Mixer FX" idea: one
+bipolar knob per channel drives a tuned effect+filter combination — left
+blends the effect in over a lowpass sweep, right over a highpass sweep,
+centre (±0.06) is a hard bypass detent. Types: DUB ECHO (ping-pong,
+dotted-eighth synced, darkened feedback loop), SPACE (plate-style convolution
+with progressive damping), NOISE (self-generating riser — audible with the
+channel open even while the track is paused, like Pioneer's), GATE (1/16
+tempo gate on the dry path), BARBER (two crossfaded flanger voices whose
+triangle windows sum to exactly 1; the comb notches climb forever — the
+knob's sign sets the direction). It sits after the insert chain, before the
+channel gain, so the cue bus hears it. BARBER and GATE schedule from the
+frame loop and freeze in a hidden tab, like the gater always has.
+
+**Channel-filter models** (`ChannelFilter` in `src/audio/fx.js`): the FLT
+sweep's personality is switchable — CLN (transparent 2-pole, the original),
+DJM (Q rises gently toward the ends), XONE (Xone:92-flavoured: two cascaded
+biquads at the same corner for 24 dB/oct, resonance that rides the sweep,
+tanh saturation for the crunch). The chain is fixed and models make unused
+stages transparent, so switching never rewires a live graph. Honest note:
+these are flavoured approximations of the hardware, not circuit models.
 
 **Lesson worth keeping:** the smoke suite drove exactly *one* automix
 handover for months, and a bug that only appears on the second one lived
@@ -378,6 +402,8 @@ Interactions with non-obvious behavior:
 | Kill buttons (HI/MID/LOW) | toggle to −26 dB and back to 0 |
 | Level meters | classic segmented meters (channel horizontal under the wave, master vertical mid-stage): fire palette, red overshoot ≥ 0.9 with clip latch and peak hold. They replaced the oscilloscope scopes |
 | Beat-loop buttons | second press on the same length exits the loop |
+| Macro FX (channel strip) | select the combo, then one bipolar fader: left = effect over lowpass, right = effect over highpass, centre = off. ◆ resets |
+| Filter model button | cycles CLN → DJM → XONE next to the FLT fader — the sweep's resonance/crunch personality |
 | Local files (crate tab) | every picked or dropped file joins a session list — reachable until reload; File handles cannot persist through the storage domain |
 | Cue bridge gate | the second AudioContext stays muted until the cue device differs from the master device — same-device output would double-play with a few ms offset and comb-filter the bass away |
 | Waveform | click jumps (within the visible window), mouse wheel or −/+ zooms ×1–×64, the ×1 label resets. Zoomed, the window follows the playhead and renders live from 8k peaks; bar-1 lines are stronger and anchored to the detected downbeat. Double-click on a track row loads into Deck A |
