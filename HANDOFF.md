@@ -94,9 +94,10 @@ src/
 dev/
   shell.html            minimal NIP-5D host shell
   serve-shell.mjs       static server + fetch proxy
-  smoke.mjs             Playwright E2E (40 checks; five sibling suites exist)
+  smoke.mjs             Playwright E2E (40 checks; six sibling suites exist)
   automix-check.mjs     three tracks in a row — guards the second handover
   macro-check.mjs       Macro FX + filter models against the live graph
+  autodj-check.mjs      analysis v2 + transition engine on known fixtures
 ```
 
 A single `requestAnimationFrame` loop in `main.js` drives everything:
@@ -186,8 +187,39 @@ two cases apart.
 `node dev/smoke.mjs` drives the real app in the real sandboxed iframe against
 the real Wavlake API. No mocks except the Nostr fixture. Last run: **40/40**,
 plus the sibling suites `fx-sync-check` (48), `automix-check` (5),
-`macro-check` (20), `playlist-check` (9) and `local-check` (7) — 129 checks
-in total.
+`macro-check` (24), `autodj-check` (27), `playlist-check` (9) and
+`local-check` (7) — 160 checks in total.
+
+**Auto-DJ v2** (milestones 1+2 of the plan). The deck knows the track:
+`analyzeStructure` (per-bar energy on the beat grid, sections, phrase length
+16/32 + offset, bar-snapped mixIn/mixOut points, a confidence that gates all
+downstream use) and `detectKey` (Goertzel chromagram vs Krumhansl profiles →
+Camelot code; chunked on the main thread; skipped over 12 min). Results
+persist in `lib/analysiscache.js` — ONE LRU blob under `analysis.v1`
+(`sdk.storage` cannot enumerate keys), ~150 entries ≈ 70 KB; cache hits skip
+the expensive passes.
+
+The automix mixes through `src/audio/transition.js`: the planner picks
+blend / cut / echo / fade (first rule wins, everything uncertain degrades to
+the legacy fade — the floor is never removed). A blend arms the incoming
+deck SAMPLE-ACCURATELY on the outgoing phrase boundary via `armStartAt` (the
+DROP mechanic, generalized — no vinyl spin-up ramp), enters at the incoming
+mix-in point, pre-kills its LOW, latches SYNC during the overlap, rides the
+crossfader on a smoothstep, swaps the bass on the phrase nearest the
+midpoint, then glides the survivor's tempo back to 0% over four bars — no
+cumulative pitch drift across a set. Echo ramps the DUB ECHO macro over the
+last bar and lets the tail ring past the cut. Every surface the machine
+drives (crossfader, both LOW EQs, tempo) yields permanently the moment a
+human's hand differs from the machine's last write (expected-vs-actual).
+
+Guards worth knowing: the SYNC latch pauses while a scheduled start is armed
+(alignPhase seeks, a seek would destroy the pending source); a user-armed
+DROP on the idle deck makes the automix stay on the legacy fader ride; the
+preload lead is measured to the MIX-OUT point, not the track end — measured
+to the end it systematically starved every track with a real outro into the
+fade fallback (45 s keeps a full phrase of headroom). Hidden tab: scheduled
+starts still fire (the audio clock runs), fader rides freeze — documented,
+not solved.
 
 **Macro FX** (`src/audio/macrofx.js`) is the Traktor "Mixer FX" idea: one
 bipolar knob per channel drives a tuned effect+filter combination — left

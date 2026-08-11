@@ -14,6 +14,7 @@ import { publishSetlist } from './lib/nostr.js';
 import { hexToNpub } from './lib/bech32.js';
 import { trackFromFile } from './lib/localtracks.js';
 import { initCache } from './lib/analysiscache.js';
+import { planTransition } from './audio/transition.js';
 
 // Warm the analysis cache early — loads race it, and a miss only costs a
 // re-analysis, so fire-and-forget is fine.
@@ -495,7 +496,7 @@ if (media) {
 // Debug handle: the napplet is alone in its sandbox, and having the live mixer
 // reachable makes the platter/FX behaviour testable from the outside — and
 // drivable: dev/live-dj.mjs runs a whole set through this handle.
-window.__djclanker = { mixer, decks: mixer.decks, settings, automix, browser, toast };
+window.__djclanker = { mixer, decks: mixer.decks, settings, automix, browser, toast, planTransition };
 
 /* ------------------------------ loop ------------------------------ */
 

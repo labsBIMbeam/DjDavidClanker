@@ -10,6 +10,8 @@
  * Driven from the frame loop via `tick(dt)` — no timers of its own.
  */
 
+import { planTransition, Transition } from './transition.js';
+
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
 export class Automix {
@@ -32,19 +34,35 @@ export class Automix {
     this.fadeSeconds = 12;
     this.syncTempo = true;
     this.shuffle = false;
+    /** 'auto' | 'blend' | 'cut' | 'echo' | 'fade' — what the planner may pick. */
+    this.transitionStyle = 'auto';
+    /** Off = always the legacy crossfade, whatever the analysis says. */
+    this.phraseAlign = true;
 
-    /** How early to start loading the next track. Decoding an mp3 is slow. */
-    this.preloadLead = 35;
+    /**
+     * How early to start loading the next track, measured to the point the
+     * NEXT transition needs it — the live deck's mix-out when structure is
+     * known, the track end otherwise. A 16-bar blend at 124 BPM plus two bars
+     * of arm lead is ~35 s, and load+analysis costs seconds on top: 45 keeps
+     * a full phrase of headroom. (Measured to the raw end, 35 systematically
+     * starved every track with a real outro into the fade fallback.)
+     */
+    this.preloadLead = 45;
 
     this.queue = [];
     this.cursor = 0;
     this.history = [];
 
     this.liveId = null; // 'A' | 'B'
-    this.fade = null; // { t, dur, from, to }
+    this.fade = null; // { t, dur, from, to } — the legacy crossfade
+    this.plan = null; // planTransition() result for the staged idle deck
+    this.transition = null; // a running Transition instance
+    this.lastTransition = null; // telemetry of the last completed one
     this.busy = false; // a load is in flight
     this.pending = null; // track staged on the idle deck
     this.lastError = '';
+    this._planTempo = 0;
+    this._lastLivePos = 0;
 
     /**
      * The deck that just handed over. It still holds its played-out track at
@@ -125,6 +143,11 @@ export class Automix {
     if (!this.enabled) return;
     this.enabled = false;
     this.fade = null;
+    if (this.transition) {
+      this.transition.cancel();
+      this.transition = null;
+    }
+    this.plan = null;
     this.onStatus('off');
   }
 
@@ -134,10 +157,11 @@ export class Automix {
 
   /** Force the transition now instead of waiting for the outro. */
   skip() {
-    if (!this.enabled || this.fade) return false;
+    if (!this.enabled || this.fade || this.transition) return false;
     const live = this.liveDeck;
     const idle = this.idleDeck;
     if (!live || !idle || idle.status !== 'ready') return false;
+    this.plan = null; // a forced skip is a quick fade, not a planned blend
     this._beginFade(live, idle, Math.min(this.fadeSeconds, 6));
     return true;
   }
@@ -187,7 +211,8 @@ export class Automix {
 
   _beginFade(live, idle, dur) {
     if (this.syncTempo && idle.bpm && live.effectiveBpm) idle.syncTo(live);
-    if (!idle.playing) idle.play();
+    // instant: a programmed entrance must not carry the vinyl spin-up ramp.
+    if (!idle.playing) idle.play({ instant: true });
     this.fade = {
       t: 0,
       dur: Math.max(1, dur),
@@ -202,6 +227,11 @@ export class Automix {
     this.onCrossfade(this.fade.to);
     this.fade = null;
     live.pause();
+    this._completeHandover(live, idle);
+  }
+
+  /** Bookkeeping shared by the legacy fade and the transition engine. */
+  _completeHandover(live, idle) {
     this.staleId = live.id; // played out — free to be refilled
     this.liveId = idle.id;
     if (idle.track) {
@@ -209,6 +239,7 @@ export class Automix {
       this.onTrack(idle.track);
     }
     this.pending = null;
+    this.plan = null;
     this.onStatus('live');
   }
 
@@ -240,6 +271,12 @@ export class Automix {
 
     const live = this.liveDeck;
     const idle = this.idleDeck;
+
+    // A running Transition owns both decks and the crossfader.
+    if (this.transition) {
+      this.transition.tick(dt);
+      return;
+    }
 
     // Mid-transition: ride the crossfader.
     if (this.fade) {
@@ -276,15 +313,61 @@ export class Automix {
     // Stage the next track early: fetching and decoding takes real seconds.
     // A track someone already cued on the idle deck is kept and played next —
     // unless this deck is the one that just handed over, whose track has
-    // already been played (see `staleId`).
+    // already been played (see `staleId`). The lead is measured to where the
+    // next transition actually starts: the mix-out point, not the track end.
     const stale = this.staleId === idle.id;
-    if (!this.busy && left < this.preloadLead && (stale || !idle.track || idle.status !== 'ready')) {
+    const rate = Math.max(0.1, Math.abs(live.nominalRate || 1));
+    const stageLeft = this.phraseAlign && live.structure && live.structure.ok
+      ? Math.min(left, Math.max(0, live.structure.mixOutSec - live.position) / rate)
+      : left;
+    if (!this.busy && stageLeft < this.preloadLead && (stale || !idle.track || idle.status !== 'ready')) {
       const track = this._takeNext();
       if (track && (stale || !idle.track || idle.track.id !== track.id)) this._loadInto(idle, track);
       return;
     }
 
-    if (idle.status === 'ready' && !idle.playing && !stale && left <= this.fadeSeconds) {
+    const idleStaged = idle.status === 'ready' && !idle.playing && !stale && idle.track;
+
+    // Plan a phrase-aligned transition once the staged deck is analyzed. A
+    // user-armed DROP on the idle deck means a human prepared this handover —
+    // the machine stays on the legacy fader ride and out of the way.
+    const userDrop = idle._drop && idle._drop.plannedBy === 'user';
+    if (this.plan) {
+      // Invalidate on a seek or a tempo grab — the timeline moved under us.
+      if (Math.abs(live.position - this._lastLivePos) > 3
+        || Math.abs(live.tempo - this._planTempo) > 0.5
+        || live.position > this.plan.endSec) {
+        this.plan = null;
+      }
+    }
+    this._lastLivePos = live.position;
+    if (!this.plan && this.phraseAlign && idleStaged && idle._analysisDone && !userDrop) {
+      this.plan = planTransition(live, idle, {
+        style: this.transitionStyle, fadeSeconds: this.fadeSeconds,
+      });
+      this._planTempo = live.tempo;
+      this.onStatus('plan');
+    }
+
+    if (this.plan && this.plan.style !== 'fade' && idleStaged) {
+      // Construct two live-bars ahead of the scheduled start, so the arm has
+      // comfortable lead and the drift re-check has something to work with.
+      const barTrack = 4 * (60 / (live.bpm || 120));
+      if (live.position >= this.plan.startSec - 2 * barTrack) {
+        this.transition = new Transition(this.mixer, live, idle, this.plan, {
+          onCrossfade: this.onCrossfade,
+          onDone: (telemetry) => {
+            this.lastTransition = telemetry;
+            this.transition = null;
+            this._completeHandover(live, idle);
+          },
+        });
+        this.onStatus('transition');
+      }
+      return;
+    }
+
+    if (idleStaged && left <= this.fadeSeconds) {
       // Never fade longer than what is actually left, or the outro runs out
       // from under the transition.
       this._beginFade(live, idle, Math.min(this.fadeSeconds, Math.max(1.5, left)));
@@ -295,12 +378,28 @@ export class Automix {
   describe() {
     if (!this.enabled) return { label: 'OFF', detail: '' };
     if (this.busy) return { label: 'LOADING', detail: this.pending ? `${this.pending.artist} – ${this.pending.title}` : '' };
+    if (this.transition) {
+      return {
+        label: this.transition.telemetry.style.toUpperCase(),
+        detail: this.transition.state === 'RELEASE' ? 'releasing tempo' : 'riding the phrase',
+      };
+    }
     if (this.fade) return { label: 'CROSSFADING', detail: `${Math.max(0, this.fade.dur - this.fade.t).toFixed(0)} s` };
     if (!this.liveId) return { label: 'READY', detail: `${this.remainingInQueue} tracks queued` };
+    const live = this.liveDeck;
     const idle = this.idleDeck;
-    const left = this.remaining;
     const next = idle && idle.track ? `${idle.track.artist} – ${idle.track.title}` : 'next track pending';
-    const untilFade = Math.max(0, left - this.fadeSeconds);
+    if (this.plan && this.plan.style !== 'fade' && live) {
+      const rate = Math.abs(live.nominalRate) || 1;
+      const until = Math.max(0, (this.plan.startSec - live.position) / rate);
+      const keys = live.musicalKey && idle && idle.musicalKey
+        ? ` · ${live.musicalKey.camelot}→${idle.musicalKey.camelot}` : '';
+      return {
+        label: 'LIVE',
+        detail: `${next} · ${this.plan.style.toUpperCase()} in ${until > 3600 ? '—' : `${Math.round(until)} s`}${keys}`,
+      };
+    }
+    const untilFade = Math.max(0, this.remaining - this.fadeSeconds);
     return {
       label: 'LIVE',
       detail: `${next} · transition in ${untilFade > 3600 ? '—' : `${Math.round(untilFade)} s`}`,
