@@ -192,7 +192,10 @@ in total.
 **Macro FX** (`src/audio/macrofx.js`) is the Traktor "Mixer FX" idea: one
 bipolar knob per channel drives a tuned effect+filter combination — left
 blends the effect in over a lowpass sweep, right over a highpass sweep,
-centre (±0.06) is a hard bypass detent. Types: DUB ECHO (ping-pong,
+centre (±0.06) is a hard bypass detent. Macros are selected in the standard
+FX-slot dropdowns (entries `macro:*`); the slot button punches the amount
+out and back, and there is only ONE macro engine per deck, so a macro in the
+second slot swaps like a duplicate insert would. Types: DUB ECHO (ping-pong,
 dotted-eighth synced, darkened feedback loop), SPACE (plate-style convolution
 with progressive damping), NOISE (self-generating riser — audible with the
 channel open even while the track is paused, like Pioneer's), GATE (1/16
@@ -402,7 +405,7 @@ Interactions with non-obvious behavior:
 | Kill buttons (HI/MID/LOW) | toggle to −26 dB and back to 0 |
 | Level meters | classic segmented meters (channel horizontal under the wave, master vertical mid-stage): fire palette, red overshoot ≥ 0.9 with clip latch and peak hold. They replaced the oscilloscope scopes |
 | Beat-loop buttons | second press on the same length exits the loop |
-| Macro FX (channel strip) | select the combo, then one bipolar fader: left = effect over lowpass, right = effect over highpass, centre = off. ◆ resets |
+| Macro FX (FX slots) | the slot dropdowns list the five combos below the insert FX; the slot body becomes one bipolar fader (left = combo over lowpass, right = over highpass, centre = off) and the slot button punches out/in to the last amount |
 | Filter model button | cycles CLN → DJM → XONE next to the FLT fader — the sweep's resonance/crunch personality |
 | Local files (crate tab) | every picked or dropped file joins a session list — reachable until reload; File handles cannot persist through the storage domain |
 | Cue bridge gate | the second AudioContext stays muted until the cue device differs from the master device — same-device output would double-play with a few ms offset and comb-filter the bass away |

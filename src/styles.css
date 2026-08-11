@@ -400,10 +400,10 @@ input[type=range].fx::-moz-range-thumb { width: 14px; height: 14px; border-radiu
 .eq-row { display: flex; gap: 10px; justify-content: center; }
 .eq-strip { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 34px; }
 .filter-row { display: flex; align-items: center; gap: 8px; }
-.macro-row { display: flex; align-items: center; gap: 6px; }
-.macro-row .fader { flex: 1; min-width: 0; }
-.macro-row .fx-sel { flex: none; width: 88px; font-size: 10px; }
 .btn-fltmodel { min-width: 42px; }
+.fx-body-macro { display: flex; align-items: center; gap: 8px; }
+.fx-body-macro .fader { flex: 1; min-width: 0; }
+.macro-side { font-size: 9px; color: var(--muted); letter-spacing: .08em; flex: none; }
 
 .deck-chan { display: flex; flex-direction: column; align-items: center; gap: 5px; }
 .chan-row { display: flex; gap: 6px; align-items: flex-end; }
