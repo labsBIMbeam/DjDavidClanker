@@ -13,6 +13,11 @@ import { capabilities, store, getPublicKey, onIdentityChanged, inShell, mediaSes
 import { publishSetlist } from './lib/nostr.js';
 import { hexToNpub } from './lib/bech32.js';
 import { trackFromFile } from './lib/localtracks.js';
+import { initCache } from './lib/analysiscache.js';
+
+// Warm the analysis cache early — loads race it, and a miss only costs a
+// re-analysis, so fire-and-forget is fine.
+initCache().catch(() => {});
 
 const SETTINGS_KEY = 'settings.v1';
 const DEFAULTS = { zapDefault: 210, zapMode: 'lnurl', proxy: '', pitchRange: 8, outputMaster: '', outputCue: '' };
