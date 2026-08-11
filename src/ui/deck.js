@@ -684,11 +684,6 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
     for (const b of [btnLoopIn, btnLoopOut, ...beatLoopBtns, btnLoopExit]) b.disabled = !loopReady;
     btnLoopOut.disabled = !loopReady || deck.loop.active;
 
-    const scratchReady = deck.canVinyl && Boolean(deck._reverse) && deck.bpm > 0;
-    scratchBtns.forEach((b, i) => {
-      b.disabled = !scratchReady;
-      b.classList.toggle('on', deck.autoScratch === SCRATCH_PATTERNS[i][1]);
-    });
     btnTap.disabled = deck.backend !== 'buffer';
     beatLoopBtns.forEach((b, i) => b.classList.toggle('on', deck.loop.active && deck.loop.beats === LOOP_BEATS[i]));
     btnLoopExit.classList.toggle('on', deck.loop.active);

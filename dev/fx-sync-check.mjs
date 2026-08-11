@@ -427,20 +427,30 @@ const asStart = await frame.evaluate(() => {
 await page.waitForTimeout(400);
 const asMid = await frame.evaluate(() => {
   const A = window.__djclanker.decks.A;
-  return { pattern: A.autoScratch, mode: A._mode, scratching: A.scratching };
+  return { pattern: A.scratchPattern, running: A.autoScratching, mode: A._mode, scratching: A.scratching };
 });
-check('auto-scratch engages the platter', asStart.ok && asMid.pattern === 'baby'
+check('auto-scratch engages the platter', asStart.ok && asMid.pattern === 'baby' && asMid.running
   && asMid.mode === 'platter' && asMid.scratching, `pattern=${asMid.pattern} mode=${asMid.mode}`);
 
-// Two bars at the current tempo, then it must hand back to normal playback.
+// The routine runs until it is told to stop — it is a performance mode you
+// leave latched, not a one-shot. Two bars in it must still be going.
 const barMs = await frame.evaluate(() => (60 / window.__djclanker.decks.A.effectiveBpm) * 4 * 1000);
 await page.waitForTimeout(Math.ceil(barMs * 2 + 900));
-const asEnd = await frame.evaluate(() => {
+const asRun = await frame.evaluate(() => {
   const A = window.__djclanker.decks.A;
-  return { pattern: A.autoScratch, mode: A._mode, playing: A.playing, pos: A.position };
+  return { running: A.autoScratching, mode: A._mode };
 });
-check('auto-scratch auto-stops after its bars', asEnd.pattern === null && asEnd.mode === 'source' && asEnd.playing,
-  `mode=${asEnd.mode}`);
+check('auto-scratch keeps running until stopped', asRun.running && asRun.mode === 'platter',
+  `running=${asRun.running} mode=${asRun.mode}`);
+
+const asEnd = await frame.evaluate(async () => {
+  const A = window.__djclanker.decks.A;
+  A.stopAutoScratch();
+  await new Promise((r) => setTimeout(r, 700)); // motor has to spin back up
+  return { running: A.autoScratching, mode: A._mode, playing: A.playing, pos: A.position };
+});
+check('auto-scratch hands the record back on stop',
+  !asEnd.running && asEnd.mode === 'source' && asEnd.playing, `mode=${asEnd.mode}`);
 check('baby scratch stays near its spot', Math.abs(asEnd.pos - asStart.posBefore) < 4,
   `drift ${(asEnd.pos - asStart.posBefore).toFixed(2)}s`);
 

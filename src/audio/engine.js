@@ -746,6 +746,12 @@ export class Deck extends Emitter {
     return this.autoScratch.toggle(name, opts);
   }
 
+  /** Start a routine outright — unlike toggle, re-issuing the same name is a no-op. */
+  startAutoScratch(name, opts) {
+    if (!this.canVinyl) return false;
+    return this.autoScratch.start(name, opts);
+  }
+
   stopAutoScratch() {
     this.autoScratch.stop();
   }
