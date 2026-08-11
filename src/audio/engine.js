@@ -24,7 +24,8 @@
  */
 
 import { fetchBlob } from '../lib/nap.js';
-import { detectBpm, waveformPeaks, rms } from './analyze.js';
+import { detectBpm, waveformPeaks, rms, analyzeStructure, detectKey, keyObject } from './analyze.js';
+import { trackCacheId, getAnalysis, putAnalysis } from '../lib/analysiscache.js';
 import { Turntable, reversedBuffer } from './scratch.js';
 import { Flanger, Gater, Phaser, Echo, Reverb, ChannelFilter } from './fx.js';
 import { MacroFX, MACRO_TYPES } from './macrofx.js';
@@ -221,6 +222,9 @@ export class Deck extends Emitter {
     this.bpmManual = false;
     this.beatOffset = null;
     this.barOffset = null;
+    this.structure = null;
+    this.musicalKey = null;
+    this._analysisFromCache = false;
     this._drop = null;
     this._taps = [];
     this.autoScratch = null;
@@ -351,15 +355,32 @@ export class Deck extends Emitter {
       this._applyMix();
       this.emit('peaks');
 
-      const res = await detectBpm(buffer);
-      if (token !== this._loadToken) return;
-      if (!this.bpmManual) {
-        this.bpm = res.bpm;
-        this.bpmConfidence = res.confidence;
+      // Cache hit skips the two expensive passes (tempo comb + chromagram);
+      // structure always runs fresh — it is cheap and carries the per-bar
+      // arrays the UI wants, which the cache deliberately does not store.
+      const cacheId = trackCacheId(this.track);
+      const cached = cacheId ? getAnalysis(cacheId) : null;
+      if (cached && cached.bpm > 0 && !this.bpmManual) {
+        this._analysisFromCache = true;
+        this.bpm = cached.bpm;
+        this.bpmConfidence = cached.cf || 0;
+        this.beatOffset = Number.isFinite(cached.bo) ? cached.bo : null;
+        this.barOffset = Number.isFinite(cached.ro) ? cached.ro : null;
+        if (cached.k && cached.k[0] >= 0) {
+          this.musicalKey = keyObject(cached.k[0], cached.k[1] === 0 ? 'major' : 'minor', cached.k[2] || 0);
+        }
+        this.emit('bpm');
+      } else {
+        const res = await detectBpm(buffer);
+        if (token !== this._loadToken) return;
+        if (!this.bpmManual) {
+          this.bpm = res.bpm;
+          this.bpmConfidence = res.confidence;
+        }
+        this.beatOffset = Number.isFinite(res.beatOffset) ? res.beatOffset : null;
+        this.barOffset = Number.isFinite(res.barOffset) ? res.barOffset : null;
+        this.emit('bpm');
       }
-      this.beatOffset = Number.isFinite(res.beatOffset) ? res.beatOffset : null;
-      this.barOffset = Number.isFinite(res.barOffset) ? res.barOffset : null;
-      this.emit('bpm');
 
       // Reversing a 6-minute stereo buffer costs ~60 MB and ~100 ms, so it is
       // built after the track is already playable, not on the critical path.
@@ -368,6 +389,39 @@ export class Deck extends Emitter {
       this._reverse = rev;
       if (this._turntable) this._turntable.setBuffers(buffer, rev);
       this.emit('vinyl-ready');
+
+      const st = await analyzeStructure(buffer, {
+        bpm: this.bpm, beatOffset: this.beatOffset, barOffset: this.barOffset,
+      });
+      if (token !== this._loadToken) return;
+      this.structure = st && st.ok ? st : null;
+      if (!this.musicalKey) {
+        const key = await detectKey(buffer);
+        if (token !== this._loadToken) return;
+        if (key.pitchClass >= 0) this.musicalKey = key;
+      }
+      this.emit('structure');
+
+      if (cacheId && this.bpm > 0) {
+        putAnalysis(cacheId, {
+          v: 1,
+          bpm: this.bpm,
+          cf: this.bpmConfidence,
+          bo: this.beatOffset,
+          ro: this.barOffset,
+          ld: this.loudness,
+          k: this.musicalKey
+            ? [this.musicalKey.pitchClass, this.musicalKey.mode === 'major' ? 0 : 1,
+              this.musicalKey.confidence]
+            : null,
+          s: this.structure
+            ? { pb: this.structure.phraseBars, po: this.structure.phraseOffset,
+              mi: this.structure.mixInSec, mo: this.structure.mixOutSec,
+              ei: this.structure.energyIn, eo: this.structure.energyOut,
+              sc: this.structure.confidence }
+            : null,
+        });
+      }
     } catch (e) {
       console.warn('analysis failed', e);
     }

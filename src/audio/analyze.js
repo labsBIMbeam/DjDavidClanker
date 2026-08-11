@@ -1,7 +1,11 @@
 /**
- * Offline analysis of a decoded AudioBuffer: waveform peaks + tempo estimate.
- * Both only run on the WebAudio path (i.e. when we actually hold the samples).
+ * Offline analysis of a decoded AudioBuffer: waveform peaks, tempo estimate,
+ * song structure (sections, phrases, mix points) and musical key. All of it
+ * only runs on the WebAudio path (i.e. when we actually hold the samples).
  */
+
+const SR = 22050; // analysis sample rate for all offline renders
+const HOP = 256; // envelope hop → ~86 envelope frames per second
 
 /**
  * Min/max envelope, `buckets` columns wide, for waveform drawing.
@@ -61,21 +65,19 @@ export function rms(buffer) {
  *
  * @returns {Promise<{bpm:number, confidence:number, beatOffset:number|null, candidates:Array}>}
  */
-export async function detectBpm(buffer) {
-  const empty = { bpm: 0, confidence: 0, beatOffset: null, candidates: [] };
-  if (!buffer || buffer.length < buffer.sampleRate * 4) return empty;
-
-  // Analyse at most 90 s from 10 % in — skips intros and keeps it fast.
-  const sr = 22050;
-  const skip = Math.floor(buffer.duration * 0.1);
-  const dur = Math.min(90, Math.max(10, buffer.duration - skip));
-  const frames = Math.floor(dur * sr);
-
+/**
+ * Two-band onset envelopes (kick 30–150 Hz + brightness > 1.5 kHz), shared by
+ * the tempo detector (short window) and the structure analysis (full track).
+ * @returns {Promise<{env:Float32Array, envLo:Float32Array, envRate:number,
+ *   n:number, skip:number}|null>}
+ */
+async function bandEnvelopes(buffer, { skip = 0, dur = buffer.duration } = {}) {
+  const frames = Math.floor(dur * SR);
   const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
-  if (!OfflineCtx) return empty;
+  if (!OfflineCtx || frames < SR * 4) return null;
 
   const renderBand = async (build) => {
-    const off = new OfflineCtx(1, frames, sr);
+    const off = new OfflineCtx(1, frames, SR);
     const src = off.createBufferSource();
     src.buffer = buffer;
     let node = src;
@@ -111,10 +113,9 @@ export async function detectBpm(buffer) {
 
   // Onset envelope: per-frame energy, half-wave rectified delta (spectral-flux
   // style, but per band in the time domain — cheap and good enough here).
-  const HOP = 256;
-  const envRate = sr / HOP;
+  const envRate = SR / HOP;
   const n = Math.floor(lowBand.length / HOP) - 1;
-  if (n < envRate * 8) return empty;
+  if (n < envRate * 8) return null;
   const env = new Float32Array(n);
   const envLo = new Float32Array(n); // kick-only flux, for the downbeat vote
   let prevLo = 0;
@@ -140,12 +141,25 @@ export async function detectBpm(buffer) {
     if (env[f] > maxE) maxE = env[f];
     if (envLo[f] > maxLo) maxLo = envLo[f];
   }
-  if (maxE <= 0) return empty;
+  if (maxE <= 0) return null;
   // sqrt compression: one monster hit must not outvote the steady grid.
   for (let f = 0; f < n; f++) {
     env[f] = Math.sqrt(env[f] / maxE);
     envLo[f] = maxLo > 0 ? Math.sqrt(envLo[f] / maxLo) : 0;
   }
+  return { env, envLo, envRate, n, skip };
+}
+
+export async function detectBpm(buffer) {
+  const empty = { bpm: 0, confidence: 0, beatOffset: null, candidates: [] };
+  if (!buffer || buffer.length < buffer.sampleRate * 4) return empty;
+
+  // Analyse at most 90 s from 10 % in — skips intros and keeps it fast.
+  const skip = Math.floor(buffer.duration * 0.1);
+  const dur = Math.min(90, Math.max(10, buffer.duration - skip));
+  const bands = await bandEnvelopes(buffer, { skip, dur });
+  if (!bands) return empty;
+  const { env, envLo, envRate, n } = bands;
 
   // Autocorrelation, extended to 3× the base lag so the comb can look at
   // harmonics without falling off the end of the array.
@@ -258,7 +272,7 @@ export async function detectBpm(buffer) {
     }
   }
 
-  const beatOffset = skip + (best.phase * HOP) / sr;
+  const beatOffset = skip + (best.phase * HOP) / SR;
   const candidates = scored
     .sort((a, b) => b.s - a.s)
     .slice(0, 5)
@@ -271,4 +285,316 @@ export async function detectBpm(buffer) {
     barOffset: beatOffset + downbeatClass * (60 / best.bpm),
     candidates,
   };
+}
+
+/**
+ * Song structure on the bar grid: per-bar energy, sections, phrase length and
+ * the two points a DJ actually needs — where to mix IN to this track and
+ * where to mix OUT of it. Everything is bar-snapped on the track's own grid.
+ * Heuristics for 4/4 electronic material; `confidence` gates all downstream
+ * use, so a wrong guess degrades to today's fixed-offset behaviour.
+ */
+export async function analyzeStructure(buffer, { bpm, beatOffset, barOffset } = {}) {
+  const none = { ok: false };
+  if (!buffer || !(bpm > 40) || !Number.isFinite(beatOffset ?? NaN)) return none;
+  const bands = await bandEnvelopes(buffer, { skip: 0, dur: buffer.duration });
+  if (!bands) return none;
+  const { env, envLo, envRate, n } = bands;
+
+  const barLen = 4 * (60 / bpm);
+  const anchorRaw = Number.isFinite(barOffset) ? barOffset : beatOffset;
+  const firstBar = anchorRaw - Math.floor(anchorRaw / barLen) * barLen;
+  const barCount = Math.floor((buffer.duration - firstBar) / barLen);
+  if (barCount < 12) return none;
+
+  // Per-bar mean of both envelopes, then a 4-bar moving average — structure
+  // lives at the bar scale, individual hits are noise here.
+  const eBar = new Float32Array(barCount);
+  const eLoBar = new Float32Array(barCount);
+  for (let b = 0; b < barCount; b++) {
+    const f0 = Math.max(0, Math.floor((firstBar + b * barLen) * envRate));
+    const f1 = Math.min(n, Math.floor((firstBar + (b + 1) * barLen) * envRate));
+    let s = 0;
+    let sLo = 0;
+    let m = 0;
+    for (let f = f0; f < f1; f++) {
+      s += env[f];
+      sLo += envLo[f];
+      m++;
+    }
+    eBar[b] = m ? s / m : 0;
+    eLoBar[b] = m ? sLo / m : 0;
+  }
+  // Symmetric 3-bar smoothing: enough to kill per-bar noise without smearing
+  // section boundaries off the phrase grid (an asymmetric window shifts them).
+  const smooth = (a) => {
+    const out = new Float32Array(a.length);
+    for (let i = 0; i < a.length; i++) {
+      let s = 0;
+      let m = 0;
+      for (let k = -1; k <= 1; k++) {
+        const j = i + k;
+        if (j >= 0 && j < a.length) {
+          s += a[j];
+          m++;
+        }
+      }
+      out[i] = m ? s / m : 0;
+    }
+    return out;
+  };
+  const quantile = (arr, p) => {
+    const s = [...arr].sort((a, b) => a - b);
+    return s[Math.min(s.length - 1, Math.floor(p * (s.length - 1)))];
+  };
+  const norm = (arr) => {
+    const hi = quantile(arr, 0.95) || 1;
+    const out = new Float32Array(arr.length);
+    for (let i = 0; i < arr.length; i++) out[i] = Math.min(1, arr[i] / hi);
+    return out;
+  };
+  const NE = norm(smooth(eBar));
+  const NLo = norm(smooth(eLoBar));
+
+  // Classify bars by kick presence and overall energy, then merge short runs.
+  const hiThr = quantile(NLo, 0.6);
+  const quietThr = quantile(NE, 0.25);
+  const kindOf = (b) =>
+    NE[b] < quietThr * 1.05 ? 'quiet' : NLo[b] >= hiThr ? 'high' : 'steady';
+  const runs = [];
+  for (let b = 0; b < barCount; b++) {
+    const kind = kindOf(b);
+    if (runs.length && runs[runs.length - 1].kind === kind) runs[runs.length - 1].endBar = b + 1;
+    else runs.push({ startBar: b, endBar: b + 1, kind });
+  }
+  for (let i = runs.length - 1; i >= 0; i--) {
+    if (runs[i].endBar - runs[i].startBar >= 4 || runs.length === 1) continue;
+    const into = i > 0 ? runs[i - 1] : runs[i + 1];
+    into.startBar = Math.min(into.startBar, runs[i].startBar);
+    into.endBar = Math.max(into.endBar, runs[i].endBar);
+    runs.splice(i, 1);
+    if (i > 0 && i < runs.length && runs[i - 1].kind === runs[i].kind) {
+      runs[i - 1].endBar = runs[i].endBar;
+      runs.splice(i, 1);
+    }
+  }
+  const sections = runs.map((r) => ({ ...r }));
+  for (const s of sections) {
+    if (s.kind !== 'quiet') continue;
+    if (s.startBar === 0) s.kind = 'intro';
+    else if (s.endBar >= barCount) s.kind = 'outro';
+    else s.kind = 'breakdown';
+  }
+
+  // Phrase grid from bar-novelty: where the arrangement changes, energy jumps.
+  const nov = new Float32Array(barCount);
+  for (let b = 1; b < barCount; b++) {
+    nov[b] = Math.max(0, NE[b] - NE[b - 1]) + 0.5 * Math.max(0, NLo[b] - NLo[b - 1]);
+  }
+  const novAc = (lag) => {
+    let s = 0;
+    let m = 0;
+    for (let b = 0; b + lag < barCount; b++) {
+      s += nov[b] * nov[b + lag];
+      m++;
+    }
+    let e = 0;
+    for (let b = 0; b < barCount; b++) e += nov[b] * nov[b];
+    return m && e ? s / m / (e / barCount) : 0;
+  };
+  const r16 = novAc(16);
+  const r32 = barCount >= 48 ? novAc(32) : 0;
+  const phraseBars = r32 > r16 * 1.15 ? 32 : 16;
+  let phraseOffset = 0;
+  let bestNov = -1;
+  for (let o = 0; o < phraseBars; o++) {
+    let s = 0;
+    let m = 0;
+    for (let b = o; b < barCount; b += phraseBars) {
+      s += nov[b];
+      m++;
+    }
+    const v = m ? s / m : 0;
+    if (v > bestNov) {
+      bestNov = v;
+      phraseOffset = o;
+    }
+  }
+  const phraseFloor = (bar) =>
+    Math.max(0, phraseOffset + Math.floor((bar - phraseOffset) / phraseBars) * phraseBars);
+  const phraseRound = (bar) =>
+    Math.max(0, phraseOffset + Math.round((bar - phraseOffset) / phraseBars) * phraseBars);
+
+  // Mix points. IN: one phrase before the first high section, so a blend runs
+  // through the build and lands the energy right as the old track leaves.
+  // OUT: the phrase boundary at the outro — ride the outro, not the last drop.
+  const firstHigh = sections.find((s) => s.kind === 'high');
+  const intro = sections[0].kind === 'intro' ? sections[0] : null;
+  let mixInBar = 0;
+  if (firstHigh) mixInBar = phraseFloor(Math.max(0, firstHigh.startBar - phraseBars));
+  else if (intro) mixInBar = Math.min(barCount - 1, intro.endBar);
+  const outro = sections[sections.length - 1].kind === 'outro'
+    ? sections[sections.length - 1] : null;
+  let mixOutBar = outro ? phraseRound(outro.startBar) : 0;
+  const fallbackOut = Math.max(0, barCount - Math.ceil(12 / barLen));
+  if (!outro || mixOutBar <= mixInBar + phraseBars / 2 || mixOutBar >= barCount) {
+    mixOutBar = Math.max(mixInBar + 1, fallbackOut);
+  }
+
+  const meanRange = (arr, a, b) => {
+    let s = 0;
+    let m = 0;
+    for (let i = Math.max(0, a); i < Math.min(arr.length, b); i++) {
+      s += arr[i];
+      m++;
+    }
+    return m ? s / m : 0;
+  };
+  const energyIn = meanRange(NE, mixInBar, mixInBar + 4);
+  const energyOut = meanRange(NE, mixOutBar - 4, mixOutBar);
+
+  // Confidence: does the track HAVE contrasting sections, and does the
+  // arrangement repeat on a phrase grid? Flat or free-form material scores
+  // low and every consumer falls back to the fixed-offset behaviour.
+  const contrast = Math.max(0, Math.min(1, (quantile(NLo, 0.75) - quantile(NLo, 0.25)) * 2.5));
+  const phraseStrength = Math.max(0, Math.min(1, Math.max(r16, r32)));
+  const confidence = Math.max(0, Math.min(1, 0.6 * contrast + 0.4 * phraseStrength));
+
+  return {
+    ok: true,
+    barLen,
+    firstBar,
+    barCount,
+    energy: NE,
+    energyLo: NLo,
+    sections,
+    phraseBars,
+    phraseOffset,
+    mixInBar,
+    mixInSec: firstBar + mixInBar * barLen,
+    mixOutBar,
+    mixOutSec: firstBar + mixOutBar * barLen,
+    energyIn,
+    energyOut,
+    confidence,
+  };
+}
+
+/* ------------------------------- key ------------------------------- */
+
+export const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+const CAMELOT_MAJOR = ['8B', '3B', '10B', '5B', '12B', '7B', '2B', '9B', '4B', '11B', '6B', '1B'];
+const CAMELOT_MINOR = ['5A', '12A', '7A', '2A', '9A', '4A', '11A', '6A', '1A', '8A', '3A', '10A'];
+// Krumhansl-Kessler tonal profiles — the standard template for key finding.
+const KRUM_MAJOR = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
+const KRUM_MINOR = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17];
+
+export function camelotFor(pitchClass, mode) {
+  if (!(pitchClass >= 0 && pitchClass < 12)) return '';
+  return (mode === 'major' ? CAMELOT_MAJOR : CAMELOT_MINOR)[pitchClass];
+}
+
+/** Rebuild the full key object from its cached tuple. */
+export function keyObject(pitchClass, mode, confidence) {
+  return {
+    pitchClass,
+    mode,
+    camelot: camelotFor(pitchClass, mode),
+    name: `${NOTE_NAMES[pitchClass]} ${mode}`,
+    confidence,
+  };
+}
+
+/**
+ * Musical key via a Goertzel chromagram: ~60 s from 25 % in, Hann-windowed
+ * 4096-sample frames, the 36 semitone frequencies C2–B4 folded into 12 pitch
+ * classes, correlated against the Krumhansl profiles in all 24 rotations.
+ * The frame loop yields to the event loop every few frames — this runs on
+ * the main thread and must not starve the UI.
+ */
+export async function detectKey(buffer) {
+  const none = { pitchClass: -1, mode: '', camelot: '', name: '', confidence: 0 };
+  if (!buffer || buffer.duration < 15 || buffer.duration > 720) return none;
+  const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  if (!OfflineCtx) return none;
+
+  const skip = buffer.duration * 0.25;
+  const dur = Math.min(60, buffer.duration - skip);
+  const off = new OfflineCtx(1, Math.floor(dur * SR), SR);
+  const src = off.createBufferSource();
+  src.buffer = buffer;
+  src.connect(off.destination);
+  src.start(0, skip);
+  const data = (await off.startRendering()).getChannelData(0);
+
+  const N = 4096;
+  const hann = new Float32Array(N);
+  for (let i = 0; i < N; i++) hann[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (N - 1));
+  const coef = [];
+  for (let st = 0; st < 36; st++) {
+    const f = 65.406 * Math.pow(2, st / 12); // C2 … B4
+    coef.push(2 * Math.cos((2 * Math.PI * f) / SR));
+  }
+
+  const chroma = new Float64Array(12);
+  const win = new Float32Array(N);
+  const frames = Math.floor(data.length / N);
+  if (frames < 4) return none;
+  for (let fr = 0; fr < frames; fr++) {
+    const o = fr * N;
+    for (let i = 0; i < N; i++) win[i] = data[o + i] * hann[i];
+    for (let k = 0; k < 36; k++) {
+      const c = coef[k];
+      let s1 = 0;
+      let s2 = 0;
+      for (let i = 0; i < N; i++) {
+        const s0 = win[i] + c * s1 - s2;
+        s2 = s1;
+        s1 = s0;
+      }
+      const power = s1 * s1 + s2 * s2 - c * s1 * s2;
+      chroma[k % 12] += Math.sqrt(Math.max(0, power));
+    }
+    if ((fr & 15) === 15) await new Promise((r) => setTimeout(r, 0));
+  }
+
+  const pearson = (a, b) => {
+    let ma = 0;
+    let mb = 0;
+    for (let i = 0; i < 12; i++) {
+      ma += a[i];
+      mb += b[i];
+    }
+    ma /= 12;
+    mb /= 12;
+    let num = 0;
+    let da = 0;
+    let db = 0;
+    for (let i = 0; i < 12; i++) {
+      num += (a[i] - ma) * (b[i] - mb);
+      da += (a[i] - ma) ** 2;
+      db += (b[i] - mb) ** 2;
+    }
+    const den = Math.sqrt(da * db);
+    return den > 0 ? num / den : 0;
+  };
+
+  let best = { corr: -2, pitchClass: -1, mode: '' };
+  let second = -2;
+  const rotated = new Float64Array(12);
+  for (const [mode, prof] of [['major', KRUM_MAJOR], ['minor', KRUM_MINOR]]) {
+    for (let rot = 0; rot < 12; rot++) {
+      for (let i = 0; i < 12; i++) rotated[i] = prof[(i - rot + 12) % 12];
+      const c = pearson(chroma, rotated);
+      if (c > best.corr) {
+        second = best.corr;
+        best = { corr: c, pitchClass: rot, mode };
+      } else if (c > second) {
+        second = c;
+      }
+    }
+  }
+  if (best.pitchClass < 0) return none;
+  const confidence = Math.max(0, Math.min(1, (best.corr - second) * 5));
+  return keyObject(best.pitchClass, best.mode, confidence);
 }
