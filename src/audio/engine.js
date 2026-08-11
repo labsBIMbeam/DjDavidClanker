@@ -27,7 +27,7 @@ import { fetchBlob } from '../lib/nap.js';
 import { detectBpm, waveformPeaks, rms } from './analyze.js';
 import { Turntable, reversedBuffer } from './scratch.js';
 import { Flanger, Gater, Phaser, Echo, Reverb, ChannelFilter } from './fx.js';
-import { MacroFX } from './macrofx.js';
+import { MacroFX, MACRO_TYPES } from './macrofx.js';
 
 /** Insert order in the chain — modulation first, gate, then time-based tails. */
 export const FX_TYPES = ['flanger', 'phaser', 'gater', 'echo', 'reverb'];
@@ -1089,25 +1089,51 @@ export class Deck extends Emitter {
   }
 
   toggleFx(unit, on) {
+    if (Deck.isMacroEntry(unit)) {
+      // A macro's "on" is a non-zero knob — the button punches it in and out,
+      // remembering the last amount so a re-punch lands where you left it.
+      const engaged = Math.abs(this.macro.value) >= 0.06;
+      const want = on === undefined ? !engaged : Boolean(on);
+      if (want === engaged) return;
+      if (want) {
+        this.setMacroValue(this._macroPunch || 0.5);
+      } else {
+        this._macroPunch = this.macro.value;
+        this.setMacroValue(0);
+      }
+      return;
+    }
     if (!this.fx[unit]) return;
     this.fx[unit].on = on === undefined ? !this.fx[unit].on : Boolean(on);
     this._applyFx();
     this.emit('fx');
   }
 
+  /** Slot entries are insert FX ('flanger') or macro combos ('macro:space'). */
+  static isMacroEntry(t) {
+    return typeof t === 'string' && t.startsWith('macro:');
+  }
+
   /**
    * Put an effect type into slot 0 or 1. If the other slot already holds that
    * type the two swap, so both buttons always drive distinct units. The unit
    * leaving a slot is switched off — nothing keeps running without a button.
+   * There is only ONE macro engine per deck, so any macro-vs-macro collision
+   * swaps like an exact duplicate would.
    */
   setFxSlot(slot, type) {
-    if (!FX_TYPES.includes(type) || (slot !== 0 && slot !== 1)) return;
+    const macroSel = Deck.isMacroEntry(type) && MACRO_TYPES.includes(type.slice(6));
+    if ((!FX_TYPES.includes(type) && !macroSel) || (slot !== 0 && slot !== 1)) return;
     const other = 1 - slot;
     const prev = this.fxSlots[slot];
     if (prev === type) return;
-    if (this.fxSlots[other] === type) this.fxSlots[other] = prev;
-    else this.toggleFx(prev, false);
+    if (this.fxSlots[other] === type || (macroSel && Deck.isMacroEntry(this.fxSlots[other]))) {
+      this.fxSlots[other] = prev;
+    } else {
+      this.toggleFx(prev, false);
+    }
     this.fxSlots[slot] = type;
+    if (macroSel) this.setMacroType(type.slice(6));
     this.emit('fx');
   }
 

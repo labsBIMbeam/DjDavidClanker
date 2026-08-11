@@ -231,28 +231,65 @@ check('neutral position is transparent again', models.neutral.freq > 20000
 
 /* --------------------------------- UI --------------------------------- */
 
-const ui = await frame.evaluate(() => {
-  const strips = document.querySelectorAll('.channel-strip');
-  const rows = document.querySelectorAll('.channel-strip .macro-row');
-  const sel = document.querySelector('.channel-strip.deck-A .macro-type');
-  const fdr = document.querySelector('.channel-strip.deck-A input.macro');
-  const btn = document.querySelector('.channel-strip.deck-A .btn-fltmodel');
-  if (fdr) {
-    fdr.value = '-0.5';
-    fdr.dispatchEvent(new Event('input', { bubbles: true }));
-  }
+// The macros live in the standard FX slots: the slot select lists them, the
+// slot body becomes one bipolar amount fader, the slot button punches.
+await frame.locator('.deck-top.deck-A .fx-sel').first().selectOption('macro:echo');
+const slotSel = await frame.evaluate(() => {
+  const d = window.__djclanker.decks.A;
+  const sel = document.querySelector('.deck-top.deck-A .fx-sel');
   return {
-    strips: strips.length, rows: rows.length,
-    options: sel ? sel.options.length : 0,
-    modelBtn: btn ? btn.textContent : null,
-    valueAfterInput: window.__djclanker.decks.A.macro.value,
+    slot0: d.fxSlots[0], engineType: d.macro.type,
+    macroOptions: [...sel.options].filter((o) => o.value.startsWith('macro:')).length,
   };
 });
-check('both channel strips carry the macro row', ui.strips === 2 && ui.rows === 2
-  && ui.options === 5, `${ui.rows} rows, ${ui.options} types`);
-check('macro fader drives the deck', Math.abs(ui.valueAfterInput + 0.5) < 0.01,
-  `value=${ui.valueAfterInput}`);
-check('filter-model button present', ui.modelBtn === 'CLN', `label=${ui.modelBtn}`);
+check('slot select lists the five macro combos', slotSel.macroOptions === 5,
+  `${slotSel.macroOptions} options`);
+check('selecting a macro in a slot drives the engine',
+  slotSel.slot0 === 'macro:echo' && slotSel.engineType === 'echo',
+  `slot=${slotSel.slot0} type=${slotSel.engineType}`);
+
+const uiAmount = await frame.evaluate(() => {
+  const fdr = document.querySelector('.deck-top.deck-A .fx-body-macro input.macro');
+  if (!fdr) return { present: false };
+  fdr.value = '-0.5';
+  fdr.dispatchEvent(new Event('input', { bubbles: true }));
+  return { present: true, value: window.__djclanker.decks.A.macro.value };
+});
+check('slot body is one bipolar amount fader that drives the deck',
+  uiAmount.present && Math.abs(uiAmount.value + 0.5) < 0.01, `value=${uiAmount.value}`);
+
+const punch = await frame.evaluate(() => {
+  const d = window.__djclanker.decks.A;
+  d.toggleFx('macro:echo'); // punch out (was -0.5)
+  const out = d.macro.value;
+  d.toggleFx('macro:echo'); // punch back in to the remembered amount
+  const back = d.macro.value;
+  return { out, back };
+});
+check('slot button punches out and back to the last amount',
+  punch.out === 0 && Math.abs(punch.back + 0.5) < 0.01,
+  `out=${punch.out} back=${punch.back}`);
+
+const collision = await frame.evaluate(() => {
+  const d = window.__djclanker.decks.A;
+  d.setFxSlot(1, 'macro:noise'); // only ONE macro engine — slots must swap
+  const r = { slots: d.fxSlots.slice(), type: d.macro.type };
+  d.setMacroValue(0);
+  d.setFxSlot(0, 'flanger');
+  d.setFxSlot(1, 'gater');
+  return r;
+});
+check('second macro slot swaps — one macro engine per deck',
+  collision.slots[0] === 'gater' && collision.slots[1] === 'macro:noise'
+  && collision.type === 'noise', collision.slots.join(' | '));
+
+const strip = await frame.evaluate(() => ({
+  macroRows: document.querySelectorAll('.macro-row').length,
+  modelBtn: (document.querySelector('.channel-strip.deck-A .btn-fltmodel') || {}).textContent,
+}));
+check('channel strip carries no extra macro menu anymore', strip.macroRows === 0,
+  `${strip.macroRows} rows`);
+check('filter-model button present', strip.modelBtn === 'CLN', `label=${strip.modelBtn}`);
 
 await frame.evaluate(() => window.__djclanker.decks.A.setMacroValue(0));
 await page.screenshot({ path: `${OUT}-macro.png`, fullPage: true });

@@ -212,20 +212,6 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
     },
   }, FILTER_MODEL_LABELS[deck.filterModel]);
 
-  // Macro FX: one bipolar knob driving a tuned effect+filter combination.
-  const macroSelect = h('select', {
-    class: 'fx-sel macro-type', title: 'Macro FX — one knob, a tuned combination',
-    onchange: () => deck.setMacroType(macroSelect.value),
-  }, ...MACRO_TYPES.map((t) => h('option', { value: t }, MACRO_LABELS[t])));
-  const macroFader = fader({
-    min: -1, max: 1, step: 0.01, value: 0, orient: 'h', label: `Macro FX deck ${deck.id}`,
-    className: 'macro',
-    onInput: (v) => deck.setMacroValue(v),
-  });
-  const btnMacroReset = h('button', {
-    class: 'btn btn-mini', title: 'Macro off (centre)',
-    onclick: () => { deck.setMacroValue(0); macroFader.value = '0'; },
-  }, '◆');
 
   const volFader = fader({
     min: 0, max: 1, step: 0.01, value: 1, orient: 'v', label: `Volume deck ${deck.id}`,
@@ -266,6 +252,25 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
 
   /** Parameter body for one effect type. Rebuilt whenever the slot switches. */
   function fxBody(type) {
+    if (type.startsWith('macro:')) {
+      // A macro is one bipolar amount: left = combo over lowpass, right =
+      // combo over highpass, centre = off.
+      const amount = fader({
+        min: -1, max: 1, step: 0.01, value: deck.macro.value, orient: 'h',
+        label: `Macro amount deck ${deck.id}`, className: 'macro',
+        onInput: (v) => deck.setMacroValue(v),
+      });
+      return {
+        el: h('div', { class: 'fx-body fx-body-macro' },
+          h('span', { class: 'macro-side' }, 'LP'),
+          amount,
+          h('span', { class: 'macro-side' }, 'HP'),
+        ),
+        sync: () => {
+          if (document.activeElement !== amount) amount.value = String(deck.macro.value);
+        },
+      };
+    }
     const set = (params) => deck.setFx(type, params);
     const p = deck.fx[type];
     if (type === 'flanger' || type === 'phaser') {
@@ -321,10 +326,14 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
       class: 'fx-sel',
       'aria-label': `Effect for slot ${i + 1}, deck ${deck.id}`,
       onchange: (e) => deck.setFxSlot(i, e.target.value),
-    }, ...FX_TYPES.map((t) => h('option', { value: t }, FX_LABELS[t])));
+    },
+    ...FX_TYPES.map((t) => h('option', { value: t }, FX_LABELS[t])),
+    h('optgroup', { label: 'MACRO — one-knob combos' },
+      ...MACRO_TYPES.map((t) => h('option', { value: `macro:${t}` }, MACRO_LABELS[t]))),
+    );
     const btn = h('button', {
       class: 'btn btn-fx',
-      title: 'Effect on/off',
+      title: 'Effect on/off (macros punch to the last amount)',
       onclick: () => deck.toggleFx(deck.fxSlots[i]),
     }, '');
     const bodyWrap = h('div');
@@ -333,8 +342,10 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
     const sync = () => {
       const type = deck.fxSlots[i];
       sel.value = type;
-      btn.textContent = FX_LABELS[type];
-      btn.classList.toggle('on', deck.fx[type].on);
+      const isMacro = type.startsWith('macro:');
+      btn.textContent = isMacro ? MACRO_LABELS[type.slice(6)] : FX_LABELS[type];
+      btn.classList.toggle('on', isMacro
+        ? Math.abs(deck.macro.value) >= 0.06 : deck.fx[type].on);
       if (shown !== type) {
         clear(bodyWrap);
         body = fxBody(type);
@@ -477,7 +488,6 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
     h('div', { class: 'deck-eq' },
       h('div', { class: 'eq-row' }, eqHigh.wrap, eqMid.wrap, eqLow.wrap),
       h('div', { class: 'filter-row' }, btnFilterReset, filterFader, btnFilterModel),
-      h('div', { class: 'macro-row' }, macroSelect, macroFader, btnMacroReset),
     ),
     h('div', { class: 'deck-chan' }, h('label', { class: 'lbl' }, 'VOL'), h('div', { class: 'chan-row' }, volFader, vu), btnPfl),
   );
@@ -702,8 +712,7 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
     btnTempoRange.textContent = `±${deck.tempoRange}`;
 
     const limited = deck.backend === 'element';
-    for (const el of [eqHigh.f, eqMid.f, eqLow.f, filterFader,
-      macroFader, macroSelect, btnMacroReset, btnFilterModel]) el.disabled = limited;
+    for (const el of [eqHigh.f, eqMid.f, eqLow.f, filterFader, btnFilterModel]) el.disabled = limited;
     for (const el of fxSection.querySelectorAll('input, button, select')) el.disabled = limited;
     root.classList.toggle('limited', limited);
 
