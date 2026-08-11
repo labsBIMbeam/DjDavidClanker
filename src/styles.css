@@ -401,6 +401,12 @@ input[type=range].fx::-moz-range-thumb { width: 14px; height: 14px; border-radiu
 .eq-strip { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 34px; }
 .filter-row { display: flex; align-items: center; gap: 8px; }
 .btn-fltmodel { min-width: 42px; }
+.badge-key { background: #2a1810; color: #f3c244; border: 1px solid var(--line); }
+.badge-key.dim { opacity: .5; }
+.row-keybpm {
+  font-family: var(--mono); font-size: 10px; color: var(--muted);
+  border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px;
+}
 .fx-body-macro { display: flex; align-items: center; gap: 8px; }
 .fx-body-macro .fader { flex: 1; min-width: 0; }
 .macro-side { font-size: 9px; color: var(--muted); letter-spacing: .08em; flex: none; }

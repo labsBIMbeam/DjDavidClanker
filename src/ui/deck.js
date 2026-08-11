@@ -59,6 +59,7 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
   const timeCur = h('span', { class: 'time-cur' }, '0:00');
   const timeRem = h('span', { class: 'time-rem' }, '-0:00');
   const badge = h('span', { class: 'badge badge-mode' }, '');
+  const badgeKey = h('span', { class: 'badge badge-key', style: { display: 'none' } }, '');
 
   const LOOP_BEATS = [1, 2, 4, 8];
   const btnLoopIn = h('button', { class: 'btn btn-mini btn-loopin', title: 'Set the loop-in point', onclick: () => deck.loopIn() }, 'IN');
@@ -444,7 +445,7 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
     h('div', { class: 'deck-head' },
       art,
       h('div', { class: 'deck-meta' },
-        h('div', { class: 'deck-id' }, `DECK ${deck.id}`, badge),
+        h('div', { class: 'deck-id' }, `DECK ${deck.id}`, badge, badgeKey),
         title,
         artist,
         h('div', { class: 'deck-times' }, timeCur, h('span', { class: 'sep' }, '/'), timeRem),
@@ -554,14 +555,58 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
     const step = beatPx >= 3 ? 1 : beatPx * 4 >= 3 ? 4 : 0;
     if (!step) return;
     const mod = (x, m) => ((x % m) + m) % m;
+    const st = deck.structure && deck.structure.ok ? deck.structure : null;
     let t = t0 - mod(t0 - anchor, beatLen);
     if (t < t0 - 0.001) t += beatLen;
     for (; t < t0 + span; t += beatLen) {
       const k = Math.round(mod(t - anchor, 4 * beatLen) / beatLen) % 4;
       if (step === 4 && k !== 0) continue;
       const x = ((t - t0) / span) * w;
-      g.fillStyle = k === 0 ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.09)';
-      g.fillRect(x, 0, k === 0 ? 2 : 1, hgt);
+      // Phrase starts get the strongest line — that is where a DJ acts.
+      const barIdx = st ? Math.round((t - st.firstBar) / st.barLen) : -1;
+      const phrase = st && k === 0 && mod(barIdx - st.phraseOffset, st.phraseBars) === 0;
+      g.fillStyle = phrase ? 'rgba(255,210,63,0.4)'
+        : k === 0 ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.09)';
+      g.fillRect(x, 0, phrase ? 2 : k === 0 ? 2 : 1, hgt);
+    }
+    drawStructure(g, w, hgt, t0, span);
+  }
+
+  const SECTION_COLORS = {
+    intro: 'rgba(255,247,236,0.10)',
+    steady: 'rgba(247,147,26,0.16)',
+    high: 'rgba(255,106,0,0.30)',
+    breakdown: 'rgba(243,194,68,0.14)',
+    outro: 'rgba(255,247,236,0.10)',
+  };
+
+  /** Section strip along the bottom edge plus the two planned mix points. */
+  function drawStructure(g, w, hgt, t0, span) {
+    const st = deck.structure;
+    if (!st || !st.ok) return;
+    const x = (t) => ((t - t0) / span) * w;
+    const y = hgt - 8;
+    for (const s of st.sections) {
+      const a = st.firstBar + s.startBar * st.barLen;
+      const b = st.firstBar + s.endBar * st.barLen;
+      if (b < t0 || a > t0 + span) continue;
+      g.fillStyle = SECTION_COLORS[s.kind] || SECTION_COLORS.steady;
+      const left = x(Math.max(a, t0));
+      g.fillRect(left, y, x(Math.min(b, t0 + span)) - left, 8);
+    }
+    for (const [t, glyph] of [[st.mixInSec, '▸'], [st.mixOutSec, '◂']]) {
+      if (t < t0 || t > t0 + span) continue;
+      const px = x(t);
+      g.strokeStyle = 'rgba(255,210,63,0.75)';
+      g.setLineDash([3, 3]);
+      g.beginPath();
+      g.moveTo(px, 0);
+      g.lineTo(px, hgt);
+      g.stroke();
+      g.setLineDash([]);
+      g.fillStyle = '#ffd23f';
+      g.font = '10px monospace';
+      g.fillText(glyph, px + (glyph === '▸' ? 3 : -9), 10);
     }
   }
 
@@ -665,6 +710,14 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
       : deck.backend === 'buffer' ? 'ok'
       : ''
     }`;
+
+    const key = deck.musicalKey;
+    badgeKey.style.display = key ? '' : 'none';
+    if (key) {
+      badgeKey.textContent = key.camelot;
+      badgeKey.title = `${key.name} · key confidence ${Math.round(key.confidence * 100)}%`;
+      badgeKey.classList.toggle('dim', key.confidence < 0.4);
+    }
     badge.title = deck.status === 'error' ? deck.error
       : deck.backend === 'element' ? 'Basic mode: volume crossfade and tempo only — no EQ/filter/FX/scratch'
       : deck.backend === 'buffer' ? 'Full WebAudio path: EQ, filter, FX, waveform, scratch' : '';
@@ -749,7 +802,8 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
   }
 
   deck.on((what) => {
-    if (what === 'peaks' || what === 'load' || what === 'ready' || what === 'error' || what === 'bpm') {
+    if (what === 'peaks' || what === 'load' || what === 'ready' || what === 'error'
+      || what === 'bpm' || what === 'structure') {
       staticWave = null;
       record.invalidate();
     }
