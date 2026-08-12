@@ -344,7 +344,7 @@ await frame.evaluate(() => {
 });
 
 // Nostr playlist tab against the shell's fixture kind-30003 set.
-await frame.locator('.tab').nth(3).click();
+await frame.locator('.tab', { hasText: 'Nostr' }).click();
 await frame.locator('.side-group .btn-primary').click();
 await page.waitForTimeout(3000);
 const setChip = await frame.locator('.side-group .chip').filter({ hasText: 'Clanker Demo Crate' }).count();

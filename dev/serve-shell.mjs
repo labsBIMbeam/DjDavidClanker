@@ -20,6 +20,15 @@ const root = join(here, '..');
 const PORT = Number(process.env.PORT || 5178);
 
 const ALLOW_HOSTS = [/(^|\.)wavlake\.com$/i, /(^|\.)cloudfront\.net$/i, /(^|\.)op3\.dev$/i];
+// User-configured media servers (Navidrome etc.) and test mocks join the
+// allowlist via env: EXTRA_PROXY_HOSTS="music.example.org,127.0.0.1".
+const EXTRA_HOSTS = (process.env.EXTRA_PROXY_HOSTS || '')
+  .split(',').map((s) => s.trim()).filter(Boolean);
+const hostAllowed = (h) => ALLOW_HOSTS.some((re) => re.test(h)) || EXTRA_HOSTS.includes(h);
+// http: is acceptable for loopback and RFC1918-style LAN servers — that is
+// exactly where a self-hosted Navidrome lives.
+const protoAllowed = (u) => u.protocol === 'https:'
+  || (u.protocol === 'http:' && EXTRA_HOSTS.includes(u.hostname));
 
 const send = (res, code, type, body, extra = {}) => {
   res.writeHead(code, { 'content-type': type, 'access-control-allow-origin': '*', ...extra });
@@ -53,7 +62,7 @@ const server = http.createServer(async (req, res) => {
       } catch {
         return send(res, 400, 'text/plain', 'bad url');
       }
-      if (parsed.protocol !== 'https:' || !ALLOW_HOSTS.some((re) => re.test(parsed.hostname))) {
+      if (!protoAllowed(parsed) || !hostAllowed(parsed.hostname)) {
         return send(res, 403, 'text/plain', `host not allowed: ${parsed.hostname}`);
       }
       // The egress path occasionally returns a transient 5xx; one retry keeps

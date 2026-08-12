@@ -187,8 +187,34 @@ two cases apart.
 `node dev/smoke.mjs` drives the real app in the real sandboxed iframe against
 the real Wavlake API. No mocks except the Nostr fixture. Last run: **40/40**,
 plus the sibling suites `fx-sync-check` (48), `automix-check` (5),
-`macro-check` (24), `autodj-check` (37), `playlist-check` (9) and
-`local-check` (7) — 170 checks in total.
+`macro-check` (24), `autodj-check` (37), `sources-check` (6, self-contained:
+it spawns its own mock Subsonic server and its own shell on :5177),
+`playlist-check` (9) and `local-check` (7) — 176 JS checks, plus
+`uv run pytest` in `ingest/` (6, including a real ffmpeg loudnorm run).
+
+**Media pipeline** (gates 1–3): the **Server tab** speaks the Subsonic API
+to a self-hosted Navidrome — the single source of truth for play-ready
+material. Auth is the protocol's salt+token scheme (`src/lib/md5.js` exists
+solely because SubtleCrypto ships no MD5); every call including the audio
+stream is a GET, so it rides the app's normal fetch path (`resource.bytes`
+in a shell, direct/proxied standalone). Configure URL/user/password in ⚙;
+the dev shell allowlists the host via `EXTRA_PROXY_HOSTS` (loopback plus
+plain-http LAN hosts are the point — that is where Navidrome lives).
+`ingest/` is a small FastAPI service (uv, ruff, pytest — the Python side of
+the repo): upload + watch folder + pluggable URL handlers, all feeding one
+pipeline (2-pass ffmpeg loudnorm to −14 LUFS → mutagen tags with an
+"Artist - Title" filename fallback → `LIBRARY/Artist/Title.ext` → optional
+Navidrome scan trigger). The ⤴ button on local session rows posts the file
+to the ingest URL — drag & drop is the instant session path, ⤴ is the same
+file's road into the permanent crate. Handlers matching `*.local.py` load
+like any other but are gitignored: site-specific gates stay off the repo.
+Failed files are quarantined in `data/failed/`, never stall the queue.
+
+**A race worth remembering:** the browser's async list loaders used to write
+whichever response arrived last — the boot-time charts fetch stomped the
+Server tab's rows mid-test and a click landed on a chart track. Every list
+request now takes an epoch (`beginList()`), and a response only lands while
+its epoch is newest; tab switches bump the epoch too.
 
 **Auto-DJ UI** (milestone 4): sections tint the bottom strip of both
 waveform render paths, phrase-start bar lines glow, mix-in/mix-out show as

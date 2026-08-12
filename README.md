@@ -88,6 +88,17 @@ network access to a host shell.
   driving — grab the fader mid-blend and it is yours
 - Switching it on mid-set adopts the running deck instead of starting over
 
+**Sources**
+- **Wavlake** charts/search/genres (value4value — zap the artist while it
+  plays), **Nostr** playlists, **local files** (drag & drop, analyzed in
+  seconds, session-scoped)
+- **Your own server**: the Server tab speaks the Subsonic API to a
+  self-hosted Navidrome — your collection, full quality, salt+token auth
+- **The crate pipeline** (`ingest/`): upload, watch folder or URL handlers →
+  loudness-normalized (−14 LUFS), tagged, filed into the library Navidrome
+  serves. The ⤴ button on a local session track sends it there — drag & drop
+  is the instant path, ⤴ makes it permanent on every device
+
 **Mixer**
 - Crossfader with constant-power curve, master with level meter
 - **Cue/headphone bus**: pre-fader listen per channel (🎧), master and

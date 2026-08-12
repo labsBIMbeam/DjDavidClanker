@@ -42,7 +42,7 @@ await frame.locator('.browser-h2', { hasText: /added to playlist/ }).waitFor({ t
 check('added all listed tracks to playlist', true);
 
 // Crate tab: playlist menu shows every track, list auto-opens the playlist.
-await frame.locator('.tab').nth(2).click();
+await frame.locator('.tab', { hasText: 'Crate' }).click();
 await frame.locator('.browser-h1', { hasText: 'Playlist' }).waitFor({ timeout: 10000 });
 const menuChips = await frame.locator('.side-group .chip', { hasText: '♪' }).count();
 const plRows = await frame.locator('.track-row').count();
@@ -61,7 +61,7 @@ await frame.locator('.track-row').first().locator('.btn-addpl').click();
 await page.waitForTimeout(400);
 
 // Back to the crate: 11 entries now, and the new one loads onto deck A.
-await frame.locator('.tab').nth(2).click();
+await frame.locator('.tab', { hasText: 'Crate' }).click();
 await frame.locator('.browser-h1', { hasText: 'Playlist' }).waitFor({ timeout: 10000 });
 const menuChips2 = await frame.locator('.side-group .chip', { hasText: '♪' }).count();
 check('searched track joined the playlist', menuChips2 === 11, `${menuChips2} chips (+ ${addedTitle})`);

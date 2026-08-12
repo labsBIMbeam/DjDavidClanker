@@ -24,7 +24,11 @@ import { trackCacheId, getAnalysis } from './lib/analysiscache.js';
 initCache().catch(() => {});
 
 const SETTINGS_KEY = 'settings.v1';
-const DEFAULTS = { zapDefault: 210, zapMode: 'lnurl', proxy: '', pitchRange: 8, outputMaster: '', outputCue: '' };
+const DEFAULTS = {
+  zapDefault: 210, zapMode: 'lnurl', proxy: '', pitchRange: 8,
+  outputMaster: '', outputCue: '',
+  subsonicUrl: '', subsonicUser: '', subsonicPass: '', ingestUrl: '',
+};
 
 const caps = capabilities();
 const mixer = new Mixer();
@@ -75,6 +79,7 @@ const browser = Browser({
   onLoadDeck: loadIntoDeck,
   onZap: (track) => openZapDialog(track, settings),
   capabilities: caps,
+  settings,
 });
 
 const automix = new Automix(mixer, {
@@ -313,6 +318,18 @@ function showSettings() {
     class: 'search-input', value: settings.proxy,
     placeholder: 'https://proxy.example/?url={url}',
   });
+  const ssUrl = h('input', {
+    class: 'search-input', value: settings.subsonicUrl,
+    placeholder: 'http://alflx:4533',
+  });
+  const ssUser = h('input', { class: 'search-input', value: settings.subsonicUser, placeholder: 'user' });
+  const ssPass = h('input', {
+    class: 'search-input', type: 'password', value: settings.subsonicPass, placeholder: 'password',
+  });
+  const ingest = h('input', {
+    class: 'search-input', value: settings.ingestUrl,
+    placeholder: 'http://alflx:8321',
+  });
 
   openModal({
     title: '⚙ Settings',
@@ -324,6 +341,10 @@ function showSettings() {
       h('button', { class: 'btn btn-ghost', onclick: () => showOutputMenu() }, '🔈 Open audio outputs'),
       h('label', { class: 'lbl' }, 'CORS proxy (standalone only)'), proxy,
       h('div', { class: 'muted' }, 'Wavlake\'s audio CDN sends no CORS headers. Inside the napplet the host fetches the bytes via resource.bytes; standalone needs a proxy for that — otherwise only basic mode runs.'),
+      h('label', { class: 'lbl' }, 'Media server (Navidrome / Subsonic)'), ssUrl, ssUser, ssPass,
+      h('div', { class: 'muted' }, 'Your self-hosted library — the Server tab. Auth uses the Subsonic salt+token scheme, the password itself never travels. In the dev shell, allow the host via EXTRA_PROXY_HOSTS.'),
+      h('label', { class: 'lbl' }, 'Ingest service'), ingest,
+      h('div', { class: 'muted' }, 'The crate pipeline (upload → loudness → tags → library). Enables the ⤴ button on local session tracks.'),
       h('div', { class: 'caps' }, h('div', { class: 'side-h' }, 'Host domains'),
         ...Object.entries(caps).filter(([k]) => k !== 'shell').map(([k, v]) =>
           h('span', { class: `cap ${v ? 'on' : 'off'}` }, `${v ? '✓' : '×'} ${k}`)),
@@ -337,6 +358,10 @@ function showSettings() {
           settings.zapMode = zapMode.value;
           settings.proxy = proxy.value.trim();
           mixer.proxy = settings.proxy;
+          settings.subsonicUrl = ssUrl.value.trim().replace(/\/+$/, '');
+          settings.subsonicUser = ssUser.value.trim();
+          settings.subsonicPass = ssPass.value;
+          settings.ingestUrl = ingest.value.trim().replace(/\/+$/, '');
           await store.setJson(SETTINGS_KEY, settings);
           close();
           toast('Saved.', 'ok');
