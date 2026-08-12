@@ -100,7 +100,7 @@ await frame.locator('input.local-input').setInputFiles({
 await frame.locator('.browser-h2', { hasText: '2 this session' }).waitFor({ timeout: 10000 });
 const localRows = await frame.locator('.track-row').count();
 check('local file list accumulates across picks', localRows === 2, `${localRows} rows`);
-await frame.locator('.tab').nth(2).click();
+await frame.locator('.tab', { hasText: 'Crate' }).click();
 const localChips = await frame.locator('.side-group .chip', { hasText: '📁' }).count();
 check('crate tab lists the session local files', localChips === 2, `${localChips} chips`);
 

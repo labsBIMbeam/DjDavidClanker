@@ -5,6 +5,7 @@ import { store } from '../lib/nap.js';
 import { setImage } from '../lib/artwork.js';
 import { trackFromFile } from '../lib/localtracks.js';
 import { getAnalysis, trackCacheId } from '../lib/analysiscache.js';
+import { subsonicConfigured, subsonicPing, subsonicSearch, subsonicRandom } from '../lib/subsonic.js';
 import { camelotFor } from '../audio/analyze.js';
 
 /** "124 · 8B" chip when the track's analysis is cached; null otherwise. */
@@ -23,7 +24,7 @@ const CRATE_KEY = 'crate.v1';
  * crate (single tracks as playlist + artists/albums as sources), and
  * kind-30003 sets from Nostr.
  */
-export function Browser({ onLoadDeck, onZap, capabilities }) {
+export function Browser({ onLoadDeck, onZap, capabilities, settings = {} }) {
   let tab = 'charts';
   let items = [];
   let heading = '';
@@ -56,14 +57,57 @@ export function Browser({ onLoadDeck, onZap, capabilities }) {
   const tabs = [
     ['charts', 'Charts'],
     ['search', 'Search'],
+    ['server', 'Server'],
     ['crate', 'Crate'],
     ['nostr', 'Nostr'],
   ].map(([key, label]) =>
     h('button', {
       class: 'tab',
-      onclick: () => { tab = key; renderSide(); if (key === 'charts') loadCharts(40); else if (key === 'crate') showCrateHome(); else renderList(); },
+      onclick: () => {
+        tab = key;
+        listEpoch++; // whatever is still in flight belongs to the old tab
+        renderSide();
+        if (key === 'charts') loadCharts(40);
+        else if (key === 'crate') showCrateHome();
+        else if (key === 'server') showServerHome();
+        else renderList();
+      },
     }, label),
   );
+
+  // The self-hosted media server (Navidrome / any Subsonic API) — the single
+  // source of truth for play-ready material.
+  const serverSearch = h('input', {
+    class: 'search-input server-search', type: 'text', placeholder: 'Search the crate server…',
+    'aria-label': 'Server search',
+    onkeydown: (e) => { if (e.key === 'Enter') runServerSearch(); },
+  });
+
+  function runServerSearch() {
+    const q = serverSearch.value.trim();
+    if (!q) return;
+    const stale = beginList();
+    guard(async () => {
+      const tracks = await subsonicSearch(settings, q);
+      if (stale()) return;
+      setItems(tracks, `Server: ${q}`, `${tracks.length} tracks from your library`);
+    }, 'Server');
+  }
+
+  function showServerHome() {
+    if (!subsonicConfigured(settings)) {
+      setItems([], 'Media server', 'Set server URL, user and password in ⚙ settings first.');
+      renderList();
+      return;
+    }
+    const stale = beginList();
+    guard(async () => {
+      await subsonicPing(settings);
+      const tracks = await subsonicRandom(settings, 30);
+      if (stale()) return;
+      setItems(tracks, 'Crate server', `${tracks.length} random from your library — search on the left`);
+    }, 'Server');
+  }
 
   // Local files accumulate for the session — every pick or deck drop joins
   // the list, so earlier files stay reachable without re-picking. (File
@@ -112,6 +156,16 @@ export function Browser({ onLoadDeck, onZap, capabilities }) {
 
   /* ------------------------------ helpers ------------------------------ */
 
+  // Late async responses must not stomp the current list: every list request
+  // takes an epoch, and a response only lands while its epoch is newest.
+  // (Found the hard way: the boot-time charts fetch replaced the Server tab's
+  // rows mid-test, and a click landed on a chart track.)
+  let listEpoch = 0;
+  const beginList = () => {
+    const ep = ++listEpoch;
+    return () => ep !== listEpoch;
+  };
+
   async function guard(fn, label) {
     busy = true;
     error = '';
@@ -136,16 +190,28 @@ export function Browser({ onLoadDeck, onZap, capabilities }) {
   /* ------------------------------ sources ------------------------------ */
 
   async function loadCharts(limit = 40) {
-    await guard(async () => setItems(await wl.topTracks(limit), `Wavlake Top ${limit}`, 'Ranked by sats over the last 7 days'), 'Charts');
+    const stale = beginList();
+    await guard(async () => {
+      const tracks = await wl.topTracks(limit);
+      if (stale()) return;
+      setItems(tracks, `Wavlake Top ${limit}`, 'Ranked by sats over the last 7 days');
+    }, 'Charts');
   }
 
   async function loadNew() {
-    await guard(async () => setItems(await wl.newTracks(), 'New on Wavlake', ''), 'New');
+    const stale = beginList();
+    await guard(async () => {
+      const tracks = await wl.newTracks();
+      if (stale()) return;
+      setItems(tracks, 'New on Wavlake', '');
+    }, 'New');
   }
 
   async function loadRandom(genre) {
+    const stale = beginList();
     await guard(async () => {
       const tracks = await wl.randomTracks(genre && genre.id);
+      if (stale()) return;
       setItems(tracks, genre ? `Random · ${genre.name}` : 'Random', `${tracks.length} tracks`);
     }, 'Random');
   }
@@ -153,31 +219,39 @@ export function Browser({ onLoadDeck, onZap, capabilities }) {
   async function runSearch() {
     const term = searchInput.value.trim();
     if (!term) return;
+    const stale = beginList();
     await guard(async () => {
       const res = await wl.search(term);
+      if (stale()) return;
       setItems(res.tracks, `Search: ${term}`, `${res.tracks.length} tracks, ${res.artists.length} artists, ${res.albums.length} albums`);
       renderSearchSide(res);
     }, 'Search');
   }
 
   async function openArtist(a) {
+    const stale = beginList();
     await guard(async () => {
       const tracks = await wl.artistTracks(a.id);
+      if (stale()) return;
       setItems(tracks, a.name, `${tracks.length} tracks`);
     }, 'Artist');
   }
 
   async function openAlbum(al) {
+    const stale = beginList();
     await guard(async () => {
       const tracks = await wl.albumTracks(al.id);
+      if (stale()) return;
       setItems(tracks, al.name, `${tracks.length} tracks`);
     }, 'Album');
   }
 
   async function loadNostrPlaylists() {
+    const stale = beginList();
     await guard(async () => {
       const key = npubInput.value.trim();
       const pls = await loadPlaylists(key || undefined);
+      if (stale()) return;
       renderNostrSide(pls);
       if (!pls.length) {
         setItems([], 'Nostr playlists', capabilities.outbox || capabilities.relay
@@ -190,8 +264,10 @@ export function Browser({ onLoadDeck, onZap, capabilities }) {
   }
 
   async function openPlaylist(pl) {
+    const stale = beginList();
     await guard(async () => {
       const tracks = await resolvePlaylist(pl);
+      if (stale()) return;
       setItems(tracks, pl.title, `${tracks.length} of ${pl.trackIds.length} entries resolved`);
     }, 'Playlist');
   }
@@ -274,6 +350,7 @@ export function Browser({ onLoadDeck, onZap, capabilities }) {
         t.sats7d ? h('span', { class: 'row-sats', title: 'Sats over the last 7 days' }, `⚡${fmtSats(t.sats7d)}`) : null,
       ),
       h('div', { class: 'row-actions' },
+        t.localFile && settings.ingestUrl ? ingestButton(t) : null,
         h('button', {
           class: 'btn btn-mini btn-addpl',
           title: t.localFile ? 'Local files stay out of the playlist' : 'Add to playlist',
@@ -322,9 +399,41 @@ export function Browser({ onLoadDeck, onZap, capabilities }) {
     return h('button', { class: `chip ${extra || ''}`, onclick }, label);
   }
 
+  /**
+   * "Send this session track into the crate": uploads the file to the ingest
+   * service, which runs the full pipeline (loudness → tags → library) so the
+   * track exists permanently on the media server afterwards. Direct fetch —
+   * the ingest service answers CORS, so this works standalone and in the dev
+   * shell; a strict napplet host without an egress bridge simply hides it.
+   */
+  function ingestButton(t) {
+    const b = h('button', {
+      class: 'btn btn-mini btn-ingest',
+      title: 'Send to the crate pipeline (loudness, tags, library)',
+      onclick: async (e) => {
+        e.stopPropagation();
+        b.disabled = true;
+        b.textContent = '…';
+        try {
+          const form = new FormData();
+          form.append('file', t.localFile, t.localFile.name);
+          const res = await fetch(`${settings.ingestUrl}/ingest`, { method: 'POST', body: form });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          b.textContent = '✓';
+          b.title = 'Queued for the crate — it appears on the server after processing';
+        } catch (err) {
+          b.textContent = '✗';
+          b.disabled = false;
+          b.title = `Upload failed: ${err.message || err}`;
+        }
+      },
+    }, '⤴');
+    return b;
+  }
+
   function renderSide() {
     for (let i = 0; i < tabs.length; i++) {
-      const key = ['charts', 'search', 'crate', 'nostr'][i];
+      const key = ['charts', 'search', 'server', 'crate', 'nostr'][i];
       tabs[i].classList.toggle('on', key === tab);
     }
     clear(sideEl);
@@ -339,7 +448,7 @@ export function Browser({ onLoadDeck, onZap, capabilities }) {
       const g = h('div', { class: 'side-group' }, h('div', { class: 'side-h' }, 'Genres'));
       if (!genreList.length) {
         wl.genres().then((rows) => { genreList = rows; renderSide(); }).catch(() => {});
-        g.appendChild(h('div', { class: 'muted' }, 'lade…'));
+        g.appendChild(h('div', { class: 'muted' }, 'loading…'));
       } else {
         for (const gen of genreList.slice(0, 24)) g.appendChild(chip(`${gen.name}`, () => loadRandom(gen)));
       }
@@ -403,6 +512,17 @@ export function Browser({ onLoadDeck, onZap, capabilities }) {
         g3.appendChild(h('button', { class: 'btn btn-ghost', onclick: showLocal }, 'Show local files'));
         sideEl.appendChild(g3);
       }
+    } else if (tab === 'server') {
+      const ok = subsonicConfigured(settings);
+      sideEl.appendChild(h('div', { class: 'side-group' },
+        h('div', { class: 'side-h' }, 'Navidrome / Subsonic'),
+        serverSearch,
+        h('button', { class: 'btn btn-primary', onclick: runServerSearch, disabled: !ok }, 'Search'),
+        chip('🎲 Random 30', showServerHome),
+        ok
+          ? h('div', { class: 'muted' }, new URL(settings.subsonicUrl).host)
+          : h('div', { class: 'muted' }, 'Not configured — ⚙ settings.'),
+      ));
     } else if (tab === 'nostr') {
       sideEl.appendChild(h('div', { class: 'side-group' },
         h('div', { class: 'side-h' }, 'Playlists (kind 30003)'),
