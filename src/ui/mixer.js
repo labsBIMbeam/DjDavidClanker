@@ -36,9 +36,35 @@ export function MixerStrip(mixer, { onPublishSet, onSettings, onOutputs }) {
     onInput: (v) => mixer.setCueVolume(v),
   });
 
+  // LINE IN: a live input as a third channel — gain, bass kill, no deck.
+  const lineVol = fader({
+    min: 0, max: 2, step: 0.01, value: mixer.lineIn.volume, orient: 'h', label: 'Line-in gain',
+    className: 'linevol',
+    onInput: (v) => mixer.setLineVolume(v),
+  });
+  const btnLineLow = h('button', {
+    class: 'btn btn-mini btn-line-low', title: 'Line-in bass kill',
+    onclick: () => mixer.setLineLow(mixer.lineIn.low < 0 ? 0 : -26),
+  }, 'L');
+  const btnLine = h('button', {
+    class: 'btn btn-mini btn-line',
+    title: 'LINE IN: default audio input into the master (virtual cable, phone, turntable). Needs media permission — devices-mode shell or standalone.',
+    onclick: async () => {
+      try {
+        if (mixer.lineIn.on) mixer.disableLineIn();
+        else await mixer.enableLineIn();
+        btnLine.classList.remove('bad');
+      } catch (e) {
+        btnLine.classList.add('bad');
+        btnLine.title = `Line-in failed: ${e.message || e} — media input needs the devices-mode shell or standalone.`;
+      }
+    },
+  }, 'LINE');
+
   const xfRow = h('div', { class: 'xf-row' },
     h('span', { class: 'lbl' }, '🎧 CUE'),
     cueVol,
+    h('div', { class: 'line-box' }, btnLine, lineVol, btnLineLow),
     endA,
     xf,
     endB,
@@ -67,6 +93,8 @@ export function MixerStrip(mixer, { onPublishSet, onSettings, onOutputs }) {
     // On-air markers: playing and actually audible on the crossfader.
     endA.classList.toggle('live', mixer.decks.A.playing && mixer.crossValue('A') > 0.25);
     endB.classList.toggle('live', mixer.decks.B.playing && mixer.crossValue('B') > 0.25);
+    btnLine.classList.toggle('on', mixer.lineIn.on);
+    btnLineLow.classList.toggle('on', mixer.lineIn.low < 0);
   }
 
   return { xfRow, middle, tick, xf };
