@@ -443,6 +443,14 @@ falls back to a heuristic mode — same mixing, canned MC lines. The LLM request
 path follows the current SDK docs but has not yet run against the live API
 from this repo (no credentials in the dev environment).
 
+The driver knows the auto-DJ era: the state carries each deck's Camelot key,
+structure confidence, the planned transition and the queue order; decisions
+may steer sources by role (charts / search / server=crate / audius / archive
+— archive finds auto-promote), override the transition style and order, and
+punch macro combos (`macro:echo` …) besides the insert FX. The heuristic
+mode exercises the same action surface, which is how the dry run stays a
+meaningful test without credentials.
+
 Playwright is installed globally in this environment. If `node dev/smoke.mjs`
 can't find the package:
 
