@@ -103,6 +103,11 @@ network access to a host shell.
   serves. The ⤴ button on a local session track sends it there — drag & drop
   is the instant path, ⤴ makes it permanent on every device
 
+**Controller**
+- **Akai MPD218** mapped out of the box (factory defaults, bank A): pads for
+  transport, SYNC, DROP, loops, momentary FX punches, scratch and automix;
+  knobs for crossfader, master, and each deck's macro + filter
+
 **Mixer**
 - Crossfader with constant-power curve, master with level meter
 - **Cue/headphone bus**: pre-fader listen per channel (🎧), master and

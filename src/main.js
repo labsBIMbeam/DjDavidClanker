@@ -16,6 +16,7 @@ import { trackFromFile } from './lib/localtracks.js';
 import { initCache } from './lib/analysiscache.js';
 import { planTransition } from './audio/transition.js';
 import { createPreanalyzer } from './audio/preanalyze.js';
+import { createMidi } from './lib/midi.js';
 import { camelotScore, bpmFoldScore, energyScore, scoreCandidate, summaryFor } from './audio/selection.js';
 import { trackCacheId, getAnalysis } from './lib/analysiscache.js';
 
@@ -530,12 +531,23 @@ if (media) {
 
 const preanalyzer = createPreanalyzer(mixer, automix);
 
+// MIDI (MPD218 factory map): silent no-op where the sandbox withholds it.
+const midi = createMidi({
+  mixer,
+  automix,
+  onCrossfade: (v) => { strip.xf.value = String(v); },
+  onStatus: (line) => toast(`🎹 ${line}`, 'ok'),
+});
+midi.connect()
+  .then((names) => { if (names.length) toast(`🎹 MIDI: ${names.join(', ')}`, 'ok', 6000); })
+  .catch(() => { /* strict sandbox or no WebMIDI — the UI covers everything */ });
+
 // Debug handle: the napplet is alone in its sandbox, and having the live mixer
 // reachable makes the platter/FX behaviour testable from the outside — and
 // drivable: dev/live-dj.mjs runs a whole set through this handle.
 window.__djclanker = {
   mixer, decks: mixer.decks, settings, automix, browser, toast, planTransition,
-  preanalyzer,
+  preanalyzer, midi,
   selection: { camelotScore, bpmFoldScore, energyScore, scoreCandidate, summaryFor },
   analysisCache: { trackCacheId, getAnalysis },
 };
