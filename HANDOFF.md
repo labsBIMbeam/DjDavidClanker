@@ -241,6 +241,17 @@ confidence); the automix bar has the AUTO/BLEND/CUT/ECHO/FADE style cycle and
 the LIST/SHUF/SMART order cycle; browser rows show a "124 · 8B" chip once a
 track's analysis is cached.
 
+**Beat tracking v4 (drift):** on top of the comb estimate, an Ellis-style
+dynamic-programming walk over the onset envelope yields real beat TIMES
+(`deck.beatTimes`, analysis window only) and `driftPct` — the |slope| of a
+least-squares line over the beat intervals, scaled to the window. Percentile
+spread would lie here: intervals are quantized to whole envelope frames, so
+a rock-steady 124 BPM track reads as mixed 41/42-frame intervals (≈2.4%
+fake spread); the regression slope averages that zero-mean noise away and
+catches the monotonic glide that matters (live recordings, vinyl rips). The
+planner refuses to phrase-plan when either side drifts > 2% ("tempo
+drifts" → fade). The drift scalar is cached (`dp`), the beat times are not.
+
 **Honest limits of the Auto-DJ:** the downbeat vote still sometimes picks
 beat 3 as bar-1 (phrase overlays then sit visibly two beats off; mixes stay
 on the grid — TAP/BASE remains the manual override). Sections and phrases
