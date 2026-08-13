@@ -485,6 +485,35 @@ const chip = await frame.evaluate(() => {
 });
 check('browser row carries the analyzed BPM · key chip', chip === '124 · 8B', `${chip}`);
 
+/* ------------------------- hidden-tab fallback ------------------------- */
+// Faked `document.hidden` + a manual visibilitychange: asserts the branch
+// logic (instant start, interval up/down), not real browser throttling —
+// headless does not throttle rAF the way a real background tab does.
+
+const bg = await frame.evaluate(async () => {
+  const dj = window.__djclanker;
+  dj.decks.A.pause();
+  await new Promise((r) => setTimeout(r, 700)); // let the brake settle
+  Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+  document.dispatchEvent(new Event('visibilitychange'));
+  dj.decks.A.play(); // vinyl mode is on, but hidden must start like a CDJ
+  const modeAtStart = dj.decks.A._mode;
+  const t0 = dj.mixer.bgTicks || 0;
+  await new Promise((r) => setTimeout(r, 500));
+  const ticked = (dj.mixer.bgTicks || 0) - t0;
+  Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+  document.dispatchEvent(new Event('visibilitychange'));
+  const frozen = dj.mixer.bgTicks;
+  await new Promise((r) => setTimeout(r, 300));
+  dj.decks.A.pause();
+  return { modeAtStart, ticked, stopped: dj.mixer.bgTicks === frozen };
+});
+check('hidden tab: vinyl play starts instantly instead of stalling at rate 0',
+  bg.modeAtStart === 'source');
+check('hidden tab: fallback interval drives the audio state machines',
+  bg.ticked >= 3, `${bg.ticked} ticks in 500 ms`);
+check('visible again: fallback stops and rAF takes over', bg.stopped === true);
+
 await page.screenshot({ path: `${OUT}-analysis.png`, fullPage: true });
 await browser.close();
 

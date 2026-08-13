@@ -511,14 +511,17 @@ export class Deck extends Emitter {
     if (this.playing && this._mode !== 'idle') return;
     this.playing = true;
 
-    if (this.vinylMode && !instant) {
+    const hidden = typeof document !== 'undefined' && document.hidden;
+    if (this.vinylMode && !instant && !hidden) {
       // Spin-up: the motor takes the record from a standstill to speed, and
       // you hear it — that is the whole point of the vinyl mode.
       this._enterPlatter(0);
       this._motorTo(this.nominalRate, this.spinUpTime, () => this._enterSource(this._turntable.position));
     } else {
-      // `instant` is the CDJ start — the automix uses it so a programmed
-      // entrance never carries the audible pitch ramp of the vinyl motor.
+      // In a hidden tab the motor's frame loop is stalled — a vinyl start
+      // would sit at rate 0 in silence until the tab returns. Start like a
+      // CDJ instead. `instant` callers (the automix) come through here too,
+      // so a programmed entrance never carries the audible pitch ramp.
       this._enterSource(this._pausedAt);
     }
     this.emit('transport');
