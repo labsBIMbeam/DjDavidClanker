@@ -2,6 +2,7 @@ import './styles.css';
 
 import { Mixer } from './audio/engine.js';
 import { Automix } from './audio/automix.js';
+import { Performer } from './audio/performer.js';
 import { DeckPanel } from './ui/deck.js';
 import { AutomixBar } from './ui/automixbar.js';
 import { MixerStrip } from './ui/mixer.js';
@@ -17,6 +18,7 @@ import { initCache } from './lib/analysiscache.js';
 import { planTransition } from './audio/transition.js';
 import { createPreanalyzer } from './audio/preanalyze.js';
 import { createMidi } from './lib/midi.js';
+import logoUrl from './assets/600.png';
 import { camelotScore, bpmFoldScore, energyScore, scoreCandidate, summaryFor } from './audio/selection.js';
 import { trackCacheId, getAnalysis } from './lib/analysiscache.js';
 
@@ -42,12 +44,17 @@ const setlist = [];
 const identityEl = h('span', { class: 'ident' }, 'not signed in');
 const modeEl = h('span', { class: 'badge' }, inShell() ? 'NAPPLET' : 'STANDALONE');
 
+// ON AIR chip: names the audible deck(s), pulses only while something plays.
+const onAirText = h('span', { class: 'onair-text' }, 'OFF AIR');
+const onAirChip = h('span', { class: 'onair' }, h('i', { class: 'onair-dot' }), onAirText);
+
 const header = h('header', { class: 'app-head' },
   h('div', { class: 'brand' },
-    h('span', { class: 'brand-bot' }, '🤖'),
+    h('img', { class: 'brand-logo', src: logoUrl, alt: '600' }),
     h('span', { class: 'brand-name' }, 'DJ DAVID CLANKER'),
     h('span', { class: 'brand-sub' }, 'wavlake · v4v · two decks'),
   ),
+  onAirChip,
   h('div', { class: 'head-right' }, modeEl, identityEl,
     h('button', { class: 'btn btn-mini', title: 'Shortcuts & info', onclick: showHelp }, '?'),
   ),
@@ -65,23 +72,109 @@ const strip = MixerStrip(mixer, { onPublishSet: publishCurrentSet, onSettings: s
 // column; both channel strips (EQ, filter, volume, cue) sit split in the
 // middle like a real 2-channel mixer. The cue/crossfader/actions bar goes
 // below the stage, right above the track browser.
-// Two independent grid rows rather than one shared grid: the middle column
-// carries a narrow MASTER on top and the two wide channel strips below, and
-// a shared grid would size both to the wider one — leaving dead space either
-// side of the master.
-deckWrap.appendChild(h('div', { class: 'stage-top' },
-  panelA.top, strip.middle, panelB.top));
-deckWrap.appendChild(h('div', { class: 'stage-bottom' },
-  panelA.bottom,
-  h('div', { class: 'channel-wrap' }, panelA.channelStrip, panelB.channelStrip),
-  panelB.bottom));
-app.appendChild(strip.xfRow);
+// Wavedeck stage: the full-width parallel wave stack (lane A / divider /
+// lane B) is the centerpiece; the master moved into the header; deck panels
+// and the split channel strips sit below the waves.
+header.insertBefore(strip.middle, header.querySelector('.head-right'));
+
+const beatDots = [0, 1, 2, 3].map(() => h('i', { class: 'beat-dot' }));
+const phaseText = h('span', { class: 'phase-text' }, 'PHASE —');
+const syncChip = h('span', { class: 'sync-chip' }, 'SYNC');
+const divider = h('div', { class: 'wave-divider' },
+  h('span', { class: 'lbl-sub' }, 'BEAT'),
+  h('span', { class: 'beat-dots' }, ...beatDots),
+  phaseText,
+  h('span', { class: 'divider-spacer' }),
+  h('button', { class: 'btn btn-mini', title: 'Zoom both lanes out', onclick: () => { panelA.setZoom(zoomOf() / 1.35); panelB.setZoom(zoomOf() / 1.35); } }, '−'),
+  h('button', { class: 'btn btn-mini', title: 'Reset both lanes to ×8', onclick: () => { panelA.setZoom(8); panelB.setZoom(8); } }, '×8'),
+  h('button', { class: 'btn btn-mini', title: 'Zoom both lanes in', onclick: () => { panelA.setZoom(zoomOf() * 1.35); panelB.setZoom(zoomOf() * 1.35); } }, '+'),
+  syncChip,
+);
+const zoomOf = () => parseFloat(panelA.lane.querySelector('.wave-wrap').dataset.zoom) || 8;
+
+// Order per the design + the user's revision: waves only in the stack, the
+// crossfader right beneath them, then the automix ticker, then one deck
+// cluster per side around the mixer core.
+deckWrap.appendChild(h('div', { class: 'wave-stack' }, panelA.lane, panelB.lane));
+deckWrap.appendChild(divider);
+deckWrap.appendChild(strip.xfRow);
+deckWrap.appendChild(h('div', { class: 'stage-main' },
+  panelA.top,
+  h('div', { class: 'channel-wrap' },
+    panelA.channelStrip,
+    h('span', { class: 'core-label' }, 'MIXER CORE'),
+    panelB.channelStrip),
+  panelB.top));
+
+/** Which decks are actually audible right now (playing + open crossfader). */
+function audibleDecks() {
+  const out = [];
+  for (const id of ['A', 'B']) {
+    const d = mixer.decks[id];
+    if (d.playing && mixer.crossValue(id) > 0.12 && d.volume > 0.05) out.push(id);
+  }
+  return out;
+}
+
+function tickWavedeck() {
+  const audible = audibleDecks();
+  const label = audible.length ? `ON AIR · DECK ${audible.join(' + ')}` : 'OFF AIR';
+  if (onAirText.textContent !== label) onAirText.textContent = label;
+  onAirChip.classList.toggle('live', audible.length > 0);
+
+  const live = audible.length ? mixer.decks[audible[0]] : null;
+  let beatIdx = -1;
+  if (live && live.bpm && Number.isFinite(live.beatOffset)) {
+    const beat = 60 / live.bpm;
+    const anchor = Number.isFinite(live.barOffset) ? live.barOffset : live.beatOffset;
+    const mod = (x, m) => ((x % m) + m) % m;
+    beatIdx = Math.floor(mod(live.position - anchor, 4 * beat) / beat);
+  }
+  beatDots.forEach((d, i) => d.classList.toggle('on', i === beatIdx));
+
+  const latched = mixer.decks.A.syncedTo || mixer.decks.B.syncedTo;
+  syncChip.classList.toggle('latched', Boolean(latched));
+  syncChip.textContent = latched ? 'SYNC LATCHED' : 'SYNC';
+  let phase = 'PHASE —';
+  if (latched) {
+    const s = mixer.decks.A.syncedTo ? mixer.decks.A : mixer.decks.B;
+    const o = s.syncedTo;
+    if (s.bpm && o.effectiveBpm) {
+      const mod = (x, m) => ((x % m) + m) % m;
+      const beat = 60 / s.effectiveBpm;
+      const obeat = 60 / o.effectiveBpm;
+      let err = mod(s.position - (s.beatOffset || 0), beat) / beat
+        - mod(o.position - (o.beatOffset || 0), obeat) / obeat;
+      if (err > 0.5) err -= 1;
+      if (err < -0.5) err += 1;
+      phase = `PHASE ${err >= 0 ? '+' : ''}${(err * beat).toFixed(3)}s`;
+    }
+  }
+  if (phaseText.textContent !== phase) phaseText.textContent = phase;
+}
 
 const browser = Browser({
   onLoadDeck: loadIntoDeck,
   onZap: (track) => openZapDialog(track, settings),
   capabilities: caps,
   settings,
+  // Marker/rail source of truth — derived from live deck+automix state, no
+  // second store anywhere.
+  deckState: () => ({
+    A: {
+      trackId: mixer.decks.A.track && mixer.decks.A.track.id,
+      audible: mixer.decks.A.playing && mixer.crossValue('A') > 0.12,
+      playing: mixer.decks.A.playing,
+    },
+    B: {
+      trackId: mixer.decks.B.track && mixer.decks.B.track.id,
+      audible: mixer.decks.B.playing && mixer.crossValue('B') > 0.12,
+      playing: mixer.decks.B.playing,
+    },
+    queue: automix.queue.slice(automix.cursor, automix.cursor + 40),
+    playedIds: automix.history.slice(-40).map((t) => t.id),
+  }),
+  onQueueFromBrowser: () => automix.setQueue(browser.currentItems()),
 });
 
 const automix = new Automix(mixer, {
@@ -95,7 +188,20 @@ const automix = new Automix(mixer, {
   },
 });
 
+// The performer rides on top of the automix: bar-synced scratches, loop
+// rolls, FX bursts and blends, every one with an undo — and it lets go of
+// anything a human touches.
+const performer = new Performer(mixer, {
+  automix,
+  onCrossfade: (v) => { strip.xf.value = String(v); },
+  onStatus: (s) => {
+    if (s === 'on') toast('Performer on — bar-synced moves over the mix.', 'ok');
+    if (s === 'off') toast('Performer off.', 'ok');
+  },
+});
+
 const automixBar = AutomixBar(automix, {
+  performer,
   onQueueFromBrowser: () => {
     const items = browser.currentItems();
     automix.setQueue(items);
@@ -103,7 +209,9 @@ const automixBar = AutomixBar(automix, {
   },
 });
 
-app.appendChild(automixBar.root);
+// The ticker sits inside the stage, between the crossfader and the deck
+// clusters; the browser stays the bottom block.
+deckWrap.insertBefore(automixBar.root, deckWrap.querySelector('.stage-main'));
 app.appendChild(browser.root);
 
 const capBanner = h('div', { class: 'cap-banner' });
@@ -547,7 +655,7 @@ midi.connect()
 // drivable: dev/live-dj.mjs runs a whole set through this handle.
 window.__djclanker = {
   mixer, decks: mixer.decks, settings, automix, browser, toast, planTransition,
-  preanalyzer, midi,
+  preanalyzer, midi, performer,
   selection: { camelotScore, bpmFoldScore, energyScore, scoreCandidate, summaryFor },
   analysisCache: { trackCacheId, getAnalysis },
 };
@@ -556,15 +664,22 @@ window.__djclanker = {
 
 let lastFrame = 0;
 let lastPoke = 0;
+let lastBrowserTick = 0;
 function frame(now) {
   const dt = lastFrame ? Math.min(0.25, (now - lastFrame) / 1000) : 0;
   lastFrame = now;
   mixer.tickAudio(); // platter physics + gater scheduling
   automix.tick(dt);
+  performer.tick(dt);
   panelA.tick();
   panelB.tick();
   strip.tick();
   automixBar.tick();
+  tickWavedeck();
+  if (now - lastBrowserTick > 500) {
+    lastBrowserTick = now;
+    browser.tick(); // track markers + the UP NEXT rail, 2 Hz is plenty
+  }
   if (now - lastPoke > 8000) {
     lastPoke = now;
     preanalyzer.poke(); // background queue analysis for the smart order
@@ -591,6 +706,7 @@ document.addEventListener('visibilitychange', () => {
       mixer.bgTicks++;
       mixer.tickAudio();
       automix.tick(dt);
+      performer.tick(dt);
     }, 100);
   } else if (!document.hidden && bgTimer) {
     clearInterval(bgTimer);

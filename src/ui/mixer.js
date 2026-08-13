@@ -76,16 +76,19 @@ export function MixerStrip(mixer, { onPublishSet, onSettings, onOutputs }) {
     ),
   );
 
+  // Wavedeck: the master lives in the header bar — horizontal fader plus a
+  // compact segmented meter, always in the corner of your eye.
   const master = fader({
-    min: 0, max: 1, step: 0.01, value: mixer.master, orient: 'v', label: 'Master volume',
+    min: 0, max: 1, step: 0.01, value: mixer.master, orient: 'h', label: 'Master volume',
     className: 'master',
     onInput: (v) => mixer.setMaster(v),
   });
-  const meter = LevelMeter(() => mixer.masterLevel(), { orient: 'v', length: 260, thickness: 18 });
+  const meter = LevelMeter(() => mixer.masterLevel(), { orient: 'h', length: 180, thickness: 10 });
 
-  const middle = h('div', { class: 'master-col' },
+  const middle = h('div', { class: 'master-col master-hbox' },
     h('span', { class: 'lbl' }, 'MASTER'),
-    h('div', { class: 'master-vert' }, master, meter.canvas),
+    meter.canvas,
+    master,
   );
 
   function tick() {
@@ -95,6 +98,9 @@ export function MixerStrip(mixer, { onPublishSet, onSettings, onOutputs }) {
     endB.classList.toggle('live', mixer.decks.B.playing && mixer.crossValue('B') > 0.25);
     btnLine.classList.toggle('on', mixer.lineIn.on);
     btnLineLow.classList.toggle('on', mixer.lineIn.low < 0);
+    // Follow the engine (MIDI K5/K6, automix blends) unless the hand is on it.
+    if (document.activeElement !== xf) xf.value = String(mixer.crossfader);
+    if (document.activeElement !== cueVol) cueVol.value = String(mixer.cueVolume);
   }
 
   return { xfRow, middle, tick, xf };

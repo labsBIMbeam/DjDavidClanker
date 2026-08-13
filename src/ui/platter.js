@@ -1,5 +1,5 @@
 import { h } from './dom.js';
-import { imageUrl } from '../lib/artwork.js';
+import logoUrl from '../assets/600.png';
 
 /**
  * The record itself: a canvas-drawn disc with the album cover as its label.
@@ -17,7 +17,7 @@ export function Platter(deck, { accent, size = 132 }) {
   const canvas = h('canvas', { class: 'platter-canvas' });
   const root = h('div', {
     class: 'platter',
-    title: 'Vinyl: ziehen zum Scratchen',
+    title: 'Vinyl: drag to scratch',
     style: { width: `${size}px`, height: `${size}px` },
   }, canvas);
 
@@ -25,30 +25,14 @@ export function Platter(deck, { accent, size = 132 }) {
     ? { hot: '#f7931a', dim: '#6b3c0a', label: '#7a480d' }
     : { hot: '#f3c244', dim: '#6e5a17', label: '#7d661a' };
 
-  let label = null; // HTMLImageElement for the cover
-  let labelKey = '';
   let ringCache = null;
   let ringKey = '';
 
-  function ensureLabel() {
-    const url = deck.track && deck.track.artworkUrl;
-    if (!url) {
-      label = null;
-      labelKey = '';
-      return;
-    }
-    if (url === labelKey) return;
-    labelKey = url;
-    label = null;
-    imageUrl(url).then((resolved) => {
-      if (!resolved || labelKey !== url) return;
-      const img = new Image();
-      img.onload = () => {
-        if (labelKey === url) label = img;
-      };
-      img.src = resolved;
-    });
-  }
+  // Wavedeck: the 600 logo IS the record label on every disc — the artwork
+  // stays in the browser rows and the deck head. Inlined by the bundler, so
+  // it loads instantly and never touches the network (CSP-safe).
+  const label = new Image();
+  label.src = logoUrl;
 
   /**
    * The unplayed waveform ring never changes for a given track, so it is
@@ -105,7 +89,6 @@ export function Platter(deck, { accent, size = 132 }) {
       ringCache = null;
     }
 
-    ensureLabel();
 
     const g = canvas.getContext('2d');
     g.setTransform(1, 0, 0, 1, 0, 0);
@@ -157,10 +140,15 @@ export function Platter(deck, { accent, size = 132 }) {
     g.beginPath();
     g.arc(0, 0, rLabel, 0, Math.PI * 2);
     g.clip();
-    if (label) {
+    if (label.complete && label.naturalWidth) {
+      // Empty deck: the logo waits at 45% — calm until a record lands.
+      g.globalAlpha = deck.track ? 1 : 0.45;
       g.drawImage(label, -rLabel, -rLabel, rLabel * 2, rLabel * 2);
-      g.fillStyle = 'rgba(0,0,0,.18)';
-      g.fillRect(-rLabel, -rLabel, rLabel * 2, rLabel * 2);
+      g.globalAlpha = 1;
+      if (deck.track) {
+        g.fillStyle = 'rgba(0,0,0,.1)';
+        g.fillRect(-rLabel, -rLabel, rLabel * 2, rLabel * 2);
+      }
     } else {
       const lg = g.createRadialGradient(-rLabel * 0.3, -rLabel * 0.35, 1, 0, 0, rLabel);
       lg.addColorStop(0, COL.hot);
@@ -189,9 +177,10 @@ export function Platter(deck, { accent, size = 132 }) {
     g.restore();
 
     /* --- waveform ring (stationary) --- */
-    if (!ringCache || ringKey !== `${labelKey}|${deck.peaks ? deck.peaks.length : 0}|${px}`) {
+    const wantKey = `${deck.peaks ? deck.peaks.length : 0}|${px}`;
+    if (!ringCache || ringKey !== wantKey) {
       ringCache = buildRing(px, dpr);
-      ringKey = `${labelKey}|${deck.peaks ? deck.peaks.length : 0}|${px}`;
+      ringKey = wantKey;
     }
     g.save();
     g.setTransform(1, 0, 0, 1, 0, 0);

@@ -20,6 +20,13 @@ const AHEAD = 0.045; // how far ahead of the clock to keep the queue filled
 const MAX_RATE = 16;
 
 /**
+ * A position written into the Turntable now is heard roughly a queue's depth
+ * later. Anything that schedules against the audio clock on top of the grain
+ * player (the autoscratch fader gates) must offset by this.
+ */
+export const GRAIN_LATENCY = AHEAD;
+
+/**
  * Equal-power grain window (half-sine). At 50 % overlap sin² + cos² = 1, so
  * the summed power through the seams is constant — this is what killed the
  * 45 Hz amplitude chatter the old butt-jointed grains had.

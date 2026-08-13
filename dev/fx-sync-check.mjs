@@ -109,7 +109,7 @@ check('click seeks inside the zoom window', Math.abs(seekAfter - (zt0 + 0.3 * zs
 
 await frame.locator('.deck-A .zoom-fit').click();
 const z3 = parseFloat(await frame.locator('.deck-A .wave-wrap').getAttribute('data-zoom'));
-check('×1 resets to the full overview', z3 === 1, `×${z3}`);
+check('reset returns to the wave-lane default ×8', z3 === 8, `×${z3}`);
 await frame.evaluate(() => {
   const f = document.querySelector('.deck-A input.pitch');
   f.value = '0';
@@ -432,14 +432,24 @@ const asMid = await frame.evaluate(() => {
 check('auto-scratch engages the platter', asStart.ok && asMid.pattern === 'baby'
   && asMid.mode === 'platter' && asMid.scratching, `pattern=${asMid.pattern} mode=${asMid.mode}`);
 
-// Two bars at the current tempo, then it must hand back to normal playback.
+// Autoscratch loops until toggled off (a DJ decides how long a scratch runs,
+// not a bar counter). Let it cycle a couple of bars, stop it, and it must
+// hand back to normal playback near the anchor — no drift over the cycles.
 const barMs = await frame.evaluate(() => (60 / window.__djclanker.decks.A.effectiveBpm) * 4 * 1000);
-await page.waitForTimeout(Math.ceil(barMs * 2 + 900));
-const asEnd = await frame.evaluate(() => {
+await page.waitForTimeout(Math.ceil(barMs * 2 + 400));
+const asLoop = await frame.evaluate(() => {
   const A = window.__djclanker.decks.A;
+  return { pattern: A.autoScratch, scratching: A.autoScratching };
+});
+check('auto-scratch keeps looping until toggled', asLoop.pattern === 'baby' && asLoop.scratching,
+  `pattern=${asLoop.pattern}`);
+const asEnd = await frame.evaluate(async () => {
+  const A = window.__djclanker.decks.A;
+  A.stopAutoScratch();
+  await new Promise((r) => setTimeout(r, 600)); // motor hand-back
   return { pattern: A.autoScratch, mode: A._mode, playing: A.playing, pos: A.position };
 });
-check('auto-scratch auto-stops after its bars', asEnd.pattern === null && asEnd.mode === 'source' && asEnd.playing,
+check('auto-scratch stop hands back to playback', asEnd.pattern === null && asEnd.mode === 'source' && asEnd.playing,
   `mode=${asEnd.mode}`);
 check('baby scratch stays near its spot', Math.abs(asEnd.pos - asStart.posBefore) < 4,
   `drift ${(asEnd.pos - asStart.posBefore).toFixed(2)}s`);

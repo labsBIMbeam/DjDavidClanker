@@ -159,7 +159,9 @@
         }
       }
 
+      const TRACE = new URLSearchParams(location.search).has('trace');
       window.addEventListener('message', (e) => {
+        if (TRACE) log('recv', e.source === frameWin ? '' : '(foreign)', e.data && e.data.type);
         if (!frameWin || e.source !== frameWin) return;
         const msg = e.data;
         if (!msg || typeof msg.type !== 'string') return;
@@ -202,8 +204,13 @@
         }
 
         frame.srcdoc = srcdoc;
+        // Grab the WindowProxy NOW, not in the load handler: it is stable
+        // across the srcdoc navigation, and the napplet's first bridge calls
+        // (settings storage.get, the charts fetch) fire while the document is
+        // still loading — with frameWin unset they were silently dropped and
+        // every chart-driven suite sat through a 25 s "Loading…".
+        frameWin = frame.contentWindow;
         frame.addEventListener('load', () => {
-          frameWin = frame.contentWindow;
           log('napplet loaded,', String(srcdoc.length), 'bytes srcdoc');
         });
       })();

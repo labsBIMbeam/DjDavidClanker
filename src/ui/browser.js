@@ -28,8 +28,11 @@ const CRATE_KEY = 'crate.v1';
  * crate (single tracks as playlist + artists/albums as sources), and
  * kind-30003 sets from Nostr.
  */
-export function Browser({ onLoadDeck, onZap, capabilities, settings = {} }) {
+export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckState, onQueueFromBrowser }) {
   let tab = 'charts';
+  /** Rendered rows for the marker pass: { el, chip, track }. */
+  let rowRefs = [];
+  const railEl = h('div', { class: 'upnext' });
   let items = [];
   let heading = '';
   let sub = '';
@@ -240,7 +243,8 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {} }) {
 
   const root = h('div', { class: 'browser' },
     h('div', { class: 'browser-tabs' }, ...tabs, h('span', { class: 'tabs-spacer' }), btnLocal, localInput),
-    h('div', { class: 'browser-main' }, sideEl, h('div', { class: 'browser-results' }, headEl, statusEl, list)),
+    h('div', { class: 'browser-main' }, sideEl,
+      h('div', { class: 'browser-results' }, headEl, statusEl, list), railEl),
   );
 
   /* ------------------------------ helpers ------------------------------ */
@@ -423,8 +427,12 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {} }) {
       title: `Load into deck ${id}`,
       onclick: (e) => { e.stopPropagation(); onLoadDeck(id, t); maybeAutoPromote(t); },
     }, id);
+    const btnA = toDeck('A');
+    const btnB = toDeck('B');
 
-    return h('div', { class: 'track-row', ondblclick: () => { onLoadDeck('A', t); maybeAutoPromote(t); } },
+    const marker = h('span', { class: 'row-marker' }, '');
+    const row = h('div', { class: 'track-row', ondblclick: () => { onLoadDeck('A', t); maybeAutoPromote(t); } },
+      marker,
       h('span', { class: 'row-n' }, String(index + 1)),
       t.artworkUrl
         ? setImage(h('img', { class: 'row-art', alt: '' }), t.artworkUrl)
@@ -452,13 +460,90 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {} }) {
           disabled: Boolean(t.localFile),
           onclick: (e) => { e.stopPropagation(); onZap(t); },
         }, '⚡'),
-        toDeck('A'),
-        toDeck('B'),
+        btnA,
+        btnB,
       ),
     );
+    rowRefs.push({ el: row, chip: marker, track: t, btnA, btnB });
+    return row;
+  }
+
+  /**
+   * Marker pass + UP NEXT rail, called on a slow tick from the app loop.
+   * State derives entirely from deck/automix truth via `deckState()` —
+   * ON AIR (playing and audible), DECK A/B (loaded), QUEUE n, PLAYED.
+   */
+  function tick() {
+    if (!deckState) return;
+    const s = deckState();
+    const queueIds = s.queue.map((t) => t.id);
+    // Traffic light on the load buttons: red = that deck is playing (loading
+    // would yank the live track), green = stopped and safe to load into.
+    const stateA = s.A.playing ? 'ld-live' : 'ld-idle';
+    const stateB = s.B.playing ? 'ld-live' : 'ld-idle';
+    for (const { el, chip, track, btnA, btnB } of rowRefs) {
+      if (!el.isConnected) continue;
+      if (btnA && !btnA.classList.contains(stateA)) {
+        btnA.classList.remove('ld-live', 'ld-idle');
+        btnA.classList.add(stateA);
+        btnA.title = s.A.playing ? 'Deck A is PLAYING — loading replaces the live track' : 'Load into deck A';
+      }
+      if (btnB && !btnB.classList.contains(stateB)) {
+        btnB.classList.remove('ld-live', 'ld-idle');
+        btnB.classList.add(stateB);
+        btnB.title = s.B.playing ? 'Deck B is PLAYING — loading replaces the live track' : 'Load into deck B';
+      }
+      let cls = '';
+      let text = '';
+      if (track.id && track.id === s.A.trackId && s.A.audible) { cls = 'onair a'; text = 'ON AIR · A'; }
+      else if (track.id && track.id === s.B.trackId && s.B.audible) { cls = 'onair b'; text = 'ON AIR · B'; }
+      else if (track.id && track.id === s.A.trackId) { cls = 'deck a'; text = 'DECK A'; }
+      else if (track.id && track.id === s.B.trackId) { cls = 'deck b'; text = 'DECK B'; }
+      else {
+        const qi = track.id ? queueIds.indexOf(track.id) : -1;
+        if (qi >= 0) { cls = 'queued'; text = `QUEUE ${qi + 1}`; }
+        else if (track.id && s.playedIds.includes(track.id)) { cls = 'played'; text = 'PLAYED'; }
+      }
+      const want = `row-marker ${cls}`;
+      if (chip.className !== want) chip.className = want;
+      if (chip.textContent !== text) chip.textContent = text;
+      const rowCls = `track-row ${cls ? `mk-${cls.split(' ')[0]}` : ''} ${cls.includes(' a') ? 'mk-a' : cls.includes(' b') ? 'mk-b' : ''}`;
+      if (el.className !== rowCls.trim()) el.className = rowCls.trim();
+    }
+    renderRail(s);
+  }
+
+  let railSig = '';
+
+  function renderRail(s) {
+    const next = s.queue.slice(0, 3);
+    const sig = next.map((t) => t.id).join('|');
+    if (sig === railSig && railEl.childElementCount) return;
+    railSig = sig;
+    clear(railEl);
+    railEl.appendChild(h('div', { class: 'side-h' }, 'UP NEXT'));
+    next.forEach((t, i) => {
+      railEl.appendChild(h('div', { class: `upnext-card ${i === 0 ? 'q1' : ''}` },
+        h('span', { class: 'upnext-q' }, `Q${i + 1}`),
+        t.artworkUrl
+          ? setImage(h('img', { class: 'upnext-art', alt: '' }), t.artworkUrl)
+          : h('div', { class: 'upnext-art upnext-ph' }, '♪'),
+        h('div', { class: 'upnext-meta' },
+          h('div', { class: 'upnext-title' }, t.title),
+          h('div', { class: 'upnext-sub' }, t.artist),
+        ),
+      ));
+    });
+    if (!next.length) railEl.appendChild(h('div', { class: 'muted' }, 'Queue is empty.'));
+    if (onQueueFromBrowser) {
+      railEl.appendChild(h('button', {
+        class: 'btn btn-ghost upnext-fill', onclick: () => onQueueFromBrowser(),
+      }, '+ QUEUE FROM LIST'));
+    }
   }
 
   function renderList() {
+    rowRefs = []; // the rows below replace everything the marker pass knew
     clear(headEl);
     if (heading) {
       headEl.appendChild(h('div', { class: 'browser-h1' }, heading));
@@ -715,7 +800,15 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {} }) {
 
   loadCrate().then(renderSide);
   renderSide();
-  loadCharts(40);
+  // Boot load with retries: the catalog occasionally answers slowly enough
+  // to time out the resource bridge — an empty first screen must not stick.
+  (async () => {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await loadCharts(40);
+      if (items.length || tab !== 'charts') return;
+      await new Promise((r) => setTimeout(r, 4000));
+    }
+  })();
 
-  return { root, currentItems, addToCrate, loadCharts, addLocalTracks };
+  return { root, currentItems, addToCrate, loadCharts, addLocalTracks, tick };
 }

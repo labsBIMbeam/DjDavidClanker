@@ -1,6 +1,6 @@
 # Handoff — DJ David Clanker
 
-As of: August 3, 2026 · Status: **working, 42/42 E2E checks green**
+As of: August 13, 2026 · Status: **working, 197 E2E checks across 9 suites + 9 pytest green**
 
 This document is for the person who touches the project next — whether that's
 you in three months or someone else. It describes what is built, **why it is
@@ -434,6 +434,21 @@ node dev/smoke.mjs # E2E, screenshots to /tmp/clanker-*.png
 reach hosts that send no CORS headers — a pure browser shell can't do that.
 Allowed hosts live in `dev/serve-shell.mjs` (`ALLOW_HOSTS`).
 
+Two dev-shell lessons that cost a day of green-suite archaeology:
+
+- **The proxy keeps a disk cache** (`dev/.proxy-cache/`, gitignored):
+  successful upstream responses are written through, and when the upstream
+  stalls past 6 s (Wavlake has slow windows) the cache answers stale. The
+  6 s abort must stay well under the napplet shim's own `resource.bytes`
+  timeout, or the fallback answers a request nobody is waiting for.
+- **`frameWin` is grabbed right after `srcdoc` is assigned, not in the
+  frame's load handler.** The WindowProxy is stable across the srcdoc
+  navigation, and the napplet's first bridge calls (settings, charts) fire
+  while the document is still loading — with `frameWin` unset the shell
+  silently dropped them, and every chart-driven suite sat through a 25 s
+  "Loading…" that looked exactly like a slow upstream. `?trace=1` on the
+  shell URL logs every received bridge message with its source verdict.
+
 Deployment:
 
 ```bash
@@ -529,6 +544,33 @@ nothing gets loaded (CSP). Badges and buttons are `r-0` (sharp), surfaces
 Deliberate deviation: the functional glyphs (⚡ 🎧 📁 …) stay, even though
 the brand voice says "no emoji" — usability beats purity.
 
+### 7.1 Wavedeck layout (August 2026)
+
+The stage follows the Wavedeck reference (battle stack, design-improvements
+drop): **the top of the screen belongs to the waves alone.** Both decks render
+as slim lanes in one `wave-stack` — cap (deck id + animated EQ icon, title,
+times, ⚡/eject), the 64 px zoom window, a 14 px full-track overview, and a
+BPM/key cap on the right. The lanes are mirrored — deck A carries its
+overview *above* the zoom window, deck B below — so the two big waves meet
+edge-to-edge at the seam, Serato-style. Under the stack: the shared beat
+row (four beat dots, phase readout, stack-wide zoom, sync chip), then the
+crossfader, then the automix ticker with MIX NOW.
+
+Below that sits **one cluster per deck** around the central mixer core
+(both channel strips + vertical MIXER CORE label): CDJ geometry on the left —
+platter (170 px, the 600 logo as the record label, level-reactive glow) with
+transport and the scratch row, the TEMPO fader riding directly beside the
+jog; on the right BASE/TAP, SYNC, DROP, four **hot cues**, the loop bar, the
+two insert FX units stacked vertically, and the macro fader. An empty lane
+runs the 600B matrix rain with "THE SIGNAL WAITS".
+
+Cascade guard: the lane reuses the `deck` class so legacy suite selectors
+keep resolving, but the generic `.deck` panel rule (flex column, padding)
+sits *later* in `styles.css` — every lane rule is therefore scoped as
+`.wave-stack .deck-lane` to outrank it. Same story for `.wave-wrap`'s legacy
+120 px height. If a lane ever renders 300 px tall with its columns stacked,
+that cascade lost again.
+
 Rules that hold throughout:
 
 - **Deck color is identity.** A is Orange everywhere, B is Gold everywhere —
@@ -569,10 +611,14 @@ Interactions with non-obvious behavior:
 | Local files (crate tab) | every picked or dropped file joins a session list — reachable until reload; File handles cannot persist through the storage domain |
 | Cue bridge gate | the second AudioContext stays muted until the cue device differs from the master device — same-device output would double-play with a few ms offset and comb-filter the bass away |
 | LINE IN (bottom bar) | a live input (virtual cable, phone, turntable preamp) as a third channel into the master: gain fader + L bass-kill. A MediaStream cannot seek/scratch/analyze, so it is deliberately a channel, not a deck. Browser processing (AGC etc.) is off. Needs media permission — devices-mode shell or standalone; the button turns red where the sandbox refuses |
-| Waveform | click jumps (within the visible window), mouse wheel or −/+ zooms ×1–×64, the ×1 label resets. Zoomed, the window follows the playhead and renders live from 8k peaks; bar-1 lines are stronger and anchored to the detected downbeat. Double-click on a track row loads into Deck A |
+| Waveform | always a playhead-centered zoom window (default ×8, wheel or −/+ for ×2–×64, the ×8 label resets; the beat row zooms both lanes together). Drag scrubs — slide the wave under the fixed playhead, seeks rate-limited to ~30/s — a plain click still jumps to the time under the cursor. The overview strip seeks on click. Bar-1 lines are stronger and anchored to the detected downbeat. Double-click on a track row loads into Deck A |
+| HOT CUES (1–4) | empty pad stores the current position, set pad jumps (and fires from stop, CDJ-style); double-click clears. Session-scoped, cleared on load |
+| Track markers (browser rows) | every row carries its live state: ON AIR · A/B (audible deck), DECK A/B (loaded), QUEUE n (position in the automix queue), PLAYED — plus the matching row tint |
+| UP NEXT rail | right of the track list: the next three queue entries as cards (Q1 highlighted), "+ QUEUE FROM LIST" fills the queue from the current view |
 | DROP (keys 3/4) | starts the deck sample-accurately on the other deck's next bar-1 — tempo synced beforehand, own entry point = cue snapped to its own 1, CDJ start without vinyl spin-up. Pressing again aborts |
 | TAP (keys T/U) | tap tempo: hit it on every beat. Uses playback-position deltas (median), so it yields the BASE bpm regardless of the tempo fader; from the 4th tap BPM + beat grid are set and marked manual. Taps give the beat, not the 1 — `barOffset` re-anchors to the tapped grid |
-| Auto-scratch (BABY/SCRB/CHRP/TRNS/BSPN) | scripted turntablism over the granular platter, beat-synced, driven from `tickAudio`: baby, scribble, chirp, transformer, backspin. Runs ~2 bars (backspin 1) then hands back to normal playback; chirp/transformer gate the deck channel, not the crossfader |
+| Auto-scratch (quick buttons + SCRATCH… book) | scripted turntablism over the granular platter (`src/audio/autoscratch.js`, ported from PR #8): 18 patterns in Foundation/Cuts/Clicks families. Record motion is analytic (no drift, cycles return to the anchor — except backspin, which is `free`), the fader gates are sample-accurate ramps on the per-deck `scratchGate` node, offset by `GRAIN_LATENCY` so clicks land on what the grain queue is actually playing. Loops until toggled off; picking another pattern swaps at the next cycle. The one sanctioned timer in the app (5 ms) — gates schedule against the audio clock and must survive a hidden tab |
+| ✦ PERFORM (automix bar) | bar-synced performer (`src/audio/performer.js`, ported from PR #8): per-track mood (weighted toward calm) rolls gestures — scratch bursts, loop rolls, FX bursts, filter sweeps, band isolation, fader chops, blends. Every gesture registers an undo that fires when its bars expire or a human touches the deck; crossfader gestures stand down while the automix runs a handover. Mood + last action read out next to the button |
 | "+" on a track row / "+ all → playlist" above the list | adds the track(s) to the playlist (Crate tab). There: a menu of all entries, × removes, "Show playlist" renders it as a loadable list |
 
 ---

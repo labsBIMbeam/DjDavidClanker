@@ -44,9 +44,11 @@ html, body {
 }
 
 .app {
-  max-width: 1400px;
+  /* Wide by design: the demo runs on 16:9 screens and the wave stack wants
+     every horizontal pixel it can get. The cap only reins in ultrawides. */
+  max-width: 1860px;
   margin: 0 auto;
-  padding: 12px 12px 60px;
+  padding: 12px 16px 60px;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -162,6 +164,261 @@ html, body {
 /* Battle layout: tops flank the vertical master, the crossfader runs full
    width between tops and bottoms, channel strips split in the middle. */
 .stage { display: flex; flex-direction: column; gap: 12px; }
+
+/* ------------------------------ wavedeck ------------------------------ */
+/* The full-width parallel wave stack: lane A / divider / lane B. */
+
+.wave-stack {
+  background: #0d0b09;
+  border: 1px solid #2a1810;
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+/* Scoped under .wave-stack so it outranks the generic .deck panel rule
+   (flex-column, padding, gap) that sits later in this file — the lane must
+   be a flat 3-column grid with none of the panel chrome. */
+.wave-stack .deck-lane {
+  position: relative;
+  display: grid;
+  grid-template-columns: 168px 1fr 96px;
+  align-items: stretch;
+  padding: 0; gap: 0; min-height: 0;
+  border: 0; border-radius: 0; background: transparent;
+}
+/* Both zoom waves press against the shared seam: deck A hangs its content
+   to the bottom edge, deck B keeps it at the top. */
+.deck-lane.deck-A .lane-center { justify-content: flex-end; }
+.lane-center .wave-wrap { height: auto; }
+.lane-cap {
+  border-right: 1px solid #1d1712;
+  padding: 8px 12px;
+  display: flex; flex-direction: column; gap: 4px; justify-content: center;
+  min-width: 0;
+}
+.lane-deck {
+  font-family: var(--mono); font-size: 10px; letter-spacing: .16em;
+  display: flex; align-items: center; gap: 8px;
+}
+.deck-lane.deck-A .lane-deck { color: #f7931a; }
+.deck-lane.deck-B .lane-deck { color: #f3c244; }
+.lane-cap .deck-title {
+  font-size: 13px; font-weight: 600; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.lane-cap .deck-times { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.lane-actions { display: flex; gap: 6px; margin-top: 2px; }
+.lane-center { display: flex; flex-direction: column; min-width: 0; }
+.lane-center .wave-wrap { position: relative; cursor: grab; }
+.lane-center .wave-wrap.scrubbing { cursor: grabbing; }
+.lane-center .wave { display: block; width: 100%; height: 64px; }
+.wave-overview {
+  display: block; width: 100%; height: 14px;
+  border-top: 1px solid #1d1712; cursor: pointer;
+}
+/* Deck A is mirrored (overview on top) so both zoom waves meet at the seam. */
+.deck-lane.deck-A .wave-overview { border-top: 0; border-bottom: 1px solid #1d1712; }
+.lane-capr {
+  border-left: 1px solid #1d1712;
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 6px; padding: 6px;
+}
+.lane-bpm { font-family: var(--mono); font-size: 17px; }
+.lane-cap { padding: 6px 10px; gap: 2px; }
+.lane-cap .deck-title { font-size: 12px; }
+
+/* One deck cluster per side: platter+transport left, performance stack right. */
+.stage-main {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 12px;
+  align-items: stretch;
+}
+.deck-main { display: flex; flex-direction: column; gap: 10px; }
+.deck-cluster { display: grid; grid-template-columns: auto 1fr; gap: 14px; }
+/* Jog column + pitch column side by side — scoped to beat the legacy
+   .deck-jog flex rule further down. */
+.deck-main .cluster-left {
+  display: grid; grid-template-columns: auto auto;
+  gap: 10px; align-items: start; justify-items: center;
+}
+.jog-main { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.deck-main .pitch-box { padding-top: 8px; }
+.cluster-right { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.perf-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.hotcue-row { display: flex; gap: 6px; align-items: center; }
+.btn-hotcue {
+  width: 34px; height: 30px;
+  font-family: var(--mono); color: #5a4b3a;
+  background: #191614; border: 1px solid #3a2f22;
+}
+.btn-hotcue.set:nth-of-type(1) { color: #ff6a00; border-color: #ff6a00; }
+.btn-hotcue.set:nth-of-type(2) { color: #f3c244; border-color: #f3c244; }
+.btn-hotcue.set:nth-of-type(3) { color: #f7931a; border-color: #f7931a; }
+.btn-hotcue.set:nth-of-type(4) { color: #ffa733; border-color: #ffa733; }
+.macro-main-row { display: flex; gap: 8px; align-items: center; }
+.macro-main-row .fader { flex: 1; min-width: 0; }
+.core-label {
+  writing-mode: vertical-rl;
+  font-family: var(--display); font-size: 10px; letter-spacing: .24em;
+  color: #5a4b3a; align-self: center;
+}
+.channel-wrap { display: flex; gap: 10px; align-items: stretch; }
+.deck-main .deck-head { padding: 0; }
+.deck-main .fx-unit { padding: 6px 8px; }
+/* Stacked FX units (outranks the legacy two-column .deck-fx grid). */
+.deck-main .deck-fx { display: flex; flex-direction: column; gap: 8px; }
+.deck-lane.deck-A .lane-bpm { color: #f7931a; }
+.deck-lane.deck-B .lane-bpm { color: #f3c244; }
+.lane-empty-msg {
+  position: absolute; inset: 0; display: none;
+  align-items: center; justify-content: center;
+  font-family: var(--display); font-size: 11px; letter-spacing: .24em;
+  color: #f7931a; background: rgba(0, 0, 0, 0.35);
+  pointer-events: none; text-transform: uppercase;
+}
+.lane-empty-msg.show { display: flex; }
+
+/* Animated 3-bar EQ icon — alive only while the deck plays. */
+.eq-ico { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; }
+.eq-ico i { width: 3px; height: 4px; background: currentColor; }
+.eq-ico.playing i { animation: eqbar .8s ease-in-out infinite; }
+.eq-ico.playing i:nth-child(2) { animation-delay: .26s; }
+.eq-ico.playing i:nth-child(3) { animation-delay: .52s; }
+@keyframes eqbar { 0%, 100% { height: 4px; } 50% { height: 12px; } }
+
+.wave-divider {
+  display: flex; align-items: center; gap: 10px;
+  background: #12100d;
+  border: 1px solid #2a1810; border-radius: var(--radius);
+  padding: 4px 12px;
+}
+.beat-dots { display: inline-flex; gap: 5px; }
+.beat-dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: #2a1810; display: inline-block;
+}
+.deck-lane.deck-A ~ .deck-lane .beat-dot.on { background: #f3c244; }
+.beat-dot.on { background: #f7931a; box-shadow: 0 0 8px rgba(247, 147, 26, 0.7); }
+.phase-text { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+.divider-spacer { flex: 1; }
+.sync-chip {
+  font-family: var(--mono); font-size: 10px; letter-spacing: .1em;
+  color: var(--muted); border: 1px solid var(--line);
+  padding: 2px 8px; border-radius: 3px;
+}
+.sync-chip.latched {
+  color: #ff6a00; border-color: #ff6a00;
+  box-shadow: 0 0 10px rgba(255, 106, 0, 0.35);
+}
+
+/* Header: logo, ON AIR chip, horizontal master. */
+.brand-logo { width: 26px; height: 26px; display: block; }
+.onair {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-family: var(--mono); font-size: 10px; letter-spacing: .14em;
+  color: #ff6a00; opacity: .45;
+}
+.onair.live { opacity: 1; }
+.onair-dot {
+  width: 7px; height: 7px; border-radius: 50%; background: #ff6a00;
+  box-shadow: 0 0 8px rgba(255, 106, 0, 0.8);
+}
+.onair.live .onair-dot { animation: onairpulse 1.1s ease-in-out infinite; }
+@keyframes onairpulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+.master-hbox {
+  flex-direction: row; align-items: center; gap: 8px;
+  min-width: 0; padding: 4px 10px; height: auto;
+}
+.master-hbox input[type=range].fader-v.master {
+  writing-mode: horizontal-tb; direction: ltr;
+  width: 110px; height: 22px; align-self: center;
+}
+.master-hbox .meter-canvas { width: 180px; height: 10px; }
+
+/* Automix ticker: 600B ember when engaged. */
+.automix.active {
+  border: 1px solid var(--fire, #f7931a);
+  box-shadow: 0 0 14px rgba(247, 147, 26, 0.1);
+}
+.btn-mixnow {
+  font-family: var(--display); font-size: 12px; letter-spacing: .06em;
+  color: #111; background: #f7931a; border: 1px solid #d97a00;
+}
+.btn-mixnow:hover:not(:disabled) { background: #ffa733; }
+
+/* Browser: track-state markers + the UP NEXT rail. */
+.row-marker {
+  font-family: var(--mono); font-size: 9px; letter-spacing: .08em;
+  padding: 2px 4px; border-radius: 3px; border: 1px solid transparent;
+  min-width: 78px; text-align: center; flex: none;
+}
+.row-marker.onair {
+  color: #ff6a00; border-color: #ff6a00;
+  background: rgba(255, 106, 0, 0.1);
+  box-shadow: 0 0 10px rgba(255, 106, 0, 0.35);
+}
+.row-marker.deck.a { color: #f7931a; border-color: #f7931a; }
+.row-marker.deck.b { color: #f3c244; border-color: #f3c244; }
+.row-marker.queued { color: var(--muted); border-color: #3a2f22; }
+.row-marker.played { color: #5a4b3a; border-color: #2a1810; }
+.track-row.mk-onair { background: rgba(255, 106, 0, 0.06); box-shadow: inset 3px 0 0 #ff6a00; }
+.track-row.mk-deck.mk-a { background: rgba(247, 147, 26, 0.05); box-shadow: inset 3px 0 0 #f7931a; }
+.track-row.mk-deck.mk-b { background: rgba(243, 194, 68, 0.05); box-shadow: inset 3px 0 0 #f3c244; }
+.track-row.mk-played { opacity: .5; }
+
+/* Load-button traffic light: red = that deck is live, green = safe to load.
+   Green is a deliberate off-palette pick (the 600B system has no "safe"
+   color) — demo clarity beats token purity here. */
+.btn-load.ld-live {
+  color: #ff5a33; border-color: #d93000;
+  background: rgba(217, 48, 0, 0.12); box-shadow: inset 0 0 6px rgba(217, 48, 0, 0.25);
+}
+.btn-load.ld-idle {
+  color: #56c274; border-color: #2e7a45;
+  background: rgba(63, 174, 90, 0.10);
+}
+
+/* Performer: the ✦ button in the automix bar plus its mood/action readout. */
+.btn-perf.on { color: #ff6a00; border-color: #ff6a00; box-shadow: 0 0 8px rgba(255, 106, 0, 0.35); }
+.perf-info {
+  font-family: var(--mono); font-size: 10px; color: var(--muted);
+  letter-spacing: .08em; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; max-width: 220px;
+}
+
+/* The scratch book: full pattern library behind the quick buttons. */
+.scratch-sel {
+  background: #171310; color: var(--text); border: 1px solid var(--line);
+  border-radius: 3px; font-family: var(--mono); font-size: 10px;
+  padding: 2px 4px; max-width: 110px;
+}
+.btn-scratch.on { color: #ff6a00; border-color: #ff6a00; }
+
+.upnext {
+  border-left: 1px solid var(--line); padding: 10px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.upnext-card {
+  display: flex; align-items: center; gap: 8px;
+  border: 1px solid var(--line); border-radius: 4px; padding: 6px;
+}
+.upnext-card.q1 { border-color: #4a3213; background: #1a130a; }
+.upnext-q {
+  font-family: var(--mono); font-size: 9px; color: var(--muted);
+  border: 1px solid #3a2f22; padding: 1px 4px; border-radius: 3px;
+}
+.upnext-card.q1 .upnext-q { color: #ffa733; border-color: #4a3213; }
+.upnext-art { width: 28px; height: 28px; border-radius: 3px; object-fit: cover; flex: none; }
+.upnext-ph { display: flex; align-items: center; justify-content: center; background: #171310; color: #5a4b3a; }
+.upnext-meta { min-width: 0; }
+.upnext-title { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.upnext-sub { font-size: 10px; color: var(--muted); }
+.upnext-fill { border-style: dashed; }
+@media (max-width: 1100px) {
+  .browser-main { grid-template-columns: 220px 1fr; }
+  .upnext { display: none; }
+  .wave-stack .deck-lane { grid-template-columns: 150px 1fr 80px; }
+}
 .stage-top,
 .stage-bottom {
   display: grid;
@@ -650,7 +907,7 @@ input[type=range].am-fade::-moz-range-thumb { width: 14px; height: 14px; border-
 }
 .tab.on { color: var(--text); border-bottom-color: var(--a); background: #12161d; }
 
-.browser-main { display: grid; grid-template-columns: 240px 1fr; min-height: 260px; }
+.browser-main { display: grid; grid-template-columns: 240px 1fr 280px; min-height: 260px; }
 .browser-side {
   border-right: 1px solid var(--line);
   padding: 12px;
