@@ -138,6 +138,79 @@ try {
     captured.length === 1 && captured[0].name === 'Up Loader - Send Me.wav'
     && captured[0].bytes > 100000, `${captured[0] && captured[0].bytes} bytes`);
 
+  /* ------------------------ discover (gates 4+5) ------------------------ */
+  // Audius and Archive.org run against the REAL APIs, same policy as the
+  // Wavlake suites; Jamendo needs a client_id, so only its hint is asserted.
+
+  await frame.locator('.tab', { hasText: 'Discover' }).click();
+  const groups = await frame.evaluate(() => ({
+    headers: [...document.querySelectorAll('.side-group .side-h')].map((e) => e.textContent),
+    jamendoHint: Boolean(document.querySelector('.jamendo-hint')),
+  }));
+  check('discover tab shows Audius, Jamendo and Archive groups',
+    ['Audius', 'Jamendo (CC)', 'Archive.org'].every((x) => groups.headers.includes(x))
+    && groups.jamendoHint, groups.headers.join(' | '));
+
+  await frame.locator('.side-group .chip', { hasText: 'Trending' }).click();
+  await frame.waitForFunction(
+    () => document.querySelectorAll('.track-row').length >= 5,
+    undefined, { timeout: 60000 },
+  );
+  const au = await frame.evaluate(() => {
+    const t = window.__djclanker.browser.currentItems()[0];
+    return {
+      id: t.id, source: t.source,
+      streamOk: t.streamUrls[0].includes('/stream'),
+      hasPromote: Boolean(document.querySelector('.track-row .btn-ingest')),
+    };
+  });
+  check('audius trending lists real tracks with promote buttons',
+    au.id.startsWith('au:') && au.source === 'audius' && au.streamOk && au.hasPromote,
+    au.id);
+
+  await frame.locator('.track-row .btn-ingest').first().click();
+  await frame.waitForFunction(() => {
+    const b = document.querySelector('.track-row .btn-ingest');
+    return b && (b.textContent === '✓' || b.textContent === '✗');
+  }, undefined, { timeout: 15000 });
+  const promoted = await fetch(`${MOCK}/ingested`).then((r) => r.json());
+  const urlEntries = promoted.filter((e) => e.url);
+  check('promote posts url + metadata to the ingest service',
+    urlEntries.length === 1 && urlEntries[0].url.includes('/stream')
+    && Boolean(urlEntries[0].title), urlEntries[0] && urlEntries[0].title);
+
+  await frame.locator('.archive-search').fill('netlabel');
+  await frame.locator('.side-group .btn-primary').nth(2).click();
+  await frame.waitForFunction(
+    () => [...document.querySelectorAll('.side-group .chip')].some((c) => c.textContent.startsWith('💿')),
+    undefined, { timeout: 60000 },
+  );
+  await frame.locator('.side-group .chip', { hasText: '💿' }).first().click();
+  await frame.waitForFunction(
+    () => document.querySelectorAll('.track-row').length >= 1
+      && window.__djclanker.browser.currentItems()[0]
+      && window.__djclanker.browser.currentItems()[0].source === 'archive',
+    undefined, { timeout: 60000 },
+  );
+  const ia = await frame.evaluate(() => {
+    const t = window.__djclanker.browser.currentItems()[0];
+    return { id: t.id, stream: t.streamUrls[0] };
+  });
+  check('archive item resolves to playable file tracks',
+    ia.id.startsWith('ia:') && ia.stream.startsWith('https://archive.org/download/'),
+    ia.id.slice(0, 40));
+
+  // Auto-promote: loading an archive find onto a deck sends it to the crate.
+  await frame.locator('.track-row').first().locator('.load-b').click();
+  await frame.waitForFunction(async () => true, undefined, { timeout: 1000 }).catch(() => {});
+  const afterAuto = await fetch(`${MOCK}/ingested`).then((r) => r.json());
+  const autoEntries = afterAuto.filter((e) => e.url && e.url.startsWith('https://archive.org/'));
+  check('auto-promote fires when an archive find hits a deck',
+    autoEntries.length === 1, `${autoEntries.length} archive promote(s)`);
+  await frame.evaluate(() => {
+    window.__djclanker.decks.B.stop();
+  });
+
   await page.screenshot({ path: `${OUT}-server.png`, fullPage: true });
 } finally {
   await browser.close();

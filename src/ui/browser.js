@@ -6,6 +6,10 @@ import { setImage } from '../lib/artwork.js';
 import { trackFromFile } from '../lib/localtracks.js';
 import { getAnalysis, trackCacheId } from '../lib/analysiscache.js';
 import { subsonicConfigured, subsonicPing, subsonicSearch, subsonicRandom } from '../lib/subsonic.js';
+import {
+  audiusTrending, audiusSearch, jamendoConfigured, jamendoSearch,
+  archiveSearch, archiveItem,
+} from '../lib/discover.js';
 import { camelotFor } from '../audio/analyze.js';
 
 /** "124 · 8B" chip when the track's analysis is cached; null otherwise. */
@@ -58,6 +62,7 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {} }) {
     ['charts', 'Charts'],
     ['search', 'Search'],
     ['server', 'Server'],
+    ['discover', 'Discover'],
     ['crate', 'Crate'],
     ['nostr', 'Nostr'],
   ].map(([key, label]) =>
@@ -70,10 +75,94 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {} }) {
         if (key === 'charts') loadCharts(40);
         else if (key === 'crate') showCrateHome();
         else if (key === 'server') showServerHome();
+        else if (key === 'discover') showDiscoverHome();
         else renderList();
       },
     }, label),
   );
+
+  /* ----------------------------- discover ----------------------------- */
+  // Spontaneous sources by role: Audius (open API, DJ catalog), Jamendo
+  // (Creative Commons — clean for public sets), Archive.org (netlabels and
+  // live sets; searching yields ITEMS, resolving one yields its tracks).
+
+  let archiveItems = [];
+  let autoPromoteArchive = true;
+
+  const audiusInput = h('input', {
+    class: 'search-input audius-search', type: 'text', placeholder: 'Search Audius…',
+    'aria-label': 'Audius search',
+    onkeydown: (e) => { if (e.key === 'Enter') runAudiusSearch(); },
+  });
+  const jamendoInput = h('input', {
+    class: 'search-input jamendo-search', type: 'text', placeholder: 'Search Jamendo (CC)…',
+    'aria-label': 'Jamendo search',
+    onkeydown: (e) => { if (e.key === 'Enter') runJamendoSearch(); },
+  });
+  const archiveInput = h('input', {
+    class: 'search-input archive-search', type: 'text', placeholder: 'Search Archive.org…',
+    'aria-label': 'Archive search',
+    onkeydown: (e) => { if (e.key === 'Enter') runArchiveSearch(); },
+  });
+
+  function showDiscoverHome() {
+    setItems([], 'Discover',
+      'Audius trending, Jamendo CC and Archive.org netlabels — pick a source on the left. ⤴ sends a find into the crate pipeline.');
+    renderList();
+  }
+
+  function runAudiusTrending() {
+    const stale = beginList();
+    guard(async () => {
+      const tracks = await audiusTrending();
+      if (stale()) return;
+      setItems(tracks, 'Audius · Trending', `${tracks.length} tracks`);
+    }, 'Audius');
+  }
+
+  function runAudiusSearch() {
+    const q = audiusInput.value.trim();
+    if (!q) return;
+    const stale = beginList();
+    guard(async () => {
+      const tracks = await audiusSearch(q);
+      if (stale()) return;
+      setItems(tracks, `Audius: ${q}`, `${tracks.length} tracks`);
+    }, 'Audius');
+  }
+
+  function runJamendoSearch() {
+    const q = jamendoInput.value.trim();
+    if (!q || !jamendoConfigured(settings)) return;
+    const stale = beginList();
+    guard(async () => {
+      const tracks = await jamendoSearch(settings, q);
+      if (stale()) return;
+      setItems(tracks, `Jamendo: ${q}`, `${tracks.length} CC tracks`);
+    }, 'Jamendo');
+  }
+
+  function runArchiveSearch() {
+    const q = archiveInput.value.trim();
+    if (!q) return;
+    const stale = beginList();
+    guard(async () => {
+      archiveItems = await archiveSearch(q);
+      if (stale()) return;
+      renderSide();
+      setItems([], `Archive: ${q}`,
+        `${archiveItems.length} items — open one on the left to list its tracks`);
+    }, 'Archive');
+  }
+
+  function openArchiveItem(item) {
+    const stale = beginList();
+    guard(async () => {
+      const tracks = await archiveItem(item.identifier);
+      if (stale()) return;
+      setItems(tracks, item.title, `${tracks.length} tracks · ${item.creator || 'archive.org'}`);
+    }, 'Archive');
+  }
 
   // The self-hosted media server (Navidrome / any Subsonic API) — the single
   // source of truth for play-ready material.
@@ -332,10 +421,10 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {} }) {
     const toDeck = (id) => h('button', {
       class: `btn btn-load load-${id.toLowerCase()}`,
       title: `Load into deck ${id}`,
-      onclick: (e) => { e.stopPropagation(); onLoadDeck(id, t); },
+      onclick: (e) => { e.stopPropagation(); onLoadDeck(id, t); maybeAutoPromote(t); },
     }, id);
 
-    return h('div', { class: 'track-row', ondblclick: () => onLoadDeck('A', t) },
+    return h('div', { class: 'track-row', ondblclick: () => { onLoadDeck('A', t); maybeAutoPromote(t); } },
       h('span', { class: 'row-n' }, String(index + 1)),
       t.artworkUrl
         ? setImage(h('img', { class: 'row-art', alt: '' }), t.artworkUrl)
@@ -350,7 +439,7 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {} }) {
         t.sats7d ? h('span', { class: 'row-sats', title: 'Sats over the last 7 days' }, `⚡${fmtSats(t.sats7d)}`) : null,
       ),
       h('div', { class: 'row-actions' },
-        t.localFile && settings.ingestUrl ? ingestButton(t) : null,
+        canPromote(t) ? ingestButton(t) : null,
         h('button', {
           class: 'btn btn-mini btn-addpl',
           title: t.localFile ? 'Local files stay out of the playlist' : 'Add to playlist',
@@ -400,12 +489,33 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {} }) {
   }
 
   /**
-   * "Send this session track into the crate": uploads the file to the ingest
-   * service, which runs the full pipeline (loudness → tags → library) so the
-   * track exists permanently on the media server afterwards. Direct fetch —
-   * the ingest service answers CORS, so this works standalone and in the dev
-   * shell; a strict napplet host without an egress bridge simply hides it.
+   * "Send this track into the crate": local files upload as multipart, URL
+   * tracks (Audius / Jamendo / Archive finds) go as POST /ingest/url with
+   * artist/title riding along for the tag fallback. Either way the ingest
+   * pipeline (loudness → tags → library) makes the track permanent on the
+   * media server. Direct fetch — the service answers CORS; a strict napplet
+   * host without an egress bridge simply hides the button.
    */
+  async function promoteTrack(t) {
+    if (t.localFile) {
+      const form = new FormData();
+      form.append('file', t.localFile, t.localFile.name);
+      const res = await fetch(`${settings.ingestUrl}/ingest`, { method: 'POST', body: form });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return;
+    }
+    const res = await fetch(`${settings.ingestUrl}/ingest/url`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url: t.streamUrls[0], artist: t.artist, title: t.title }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || json.ok === false) throw new Error(json.error || `HTTP ${res.status}`);
+  }
+
+  const canPromote = (t) => Boolean(settings.ingestUrl)
+    && (t.localFile || (t.streamUrls && t.streamUrls.length && t.source && t.source !== 'subsonic'));
+
   function ingestButton(t) {
     const b = h('button', {
       class: 'btn btn-mini btn-ingest',
@@ -415,25 +525,29 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {} }) {
         b.disabled = true;
         b.textContent = '…';
         try {
-          const form = new FormData();
-          form.append('file', t.localFile, t.localFile.name);
-          const res = await fetch(`${settings.ingestUrl}/ingest`, { method: 'POST', body: form });
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          await promoteTrack(t);
           b.textContent = '✓';
           b.title = 'Queued for the crate — it appears on the server after processing';
         } catch (err) {
           b.textContent = '✗';
           b.disabled = false;
-          b.title = `Upload failed: ${err.message || err}`;
+          b.title = `Send failed: ${err.message || err}`;
         }
       },
     }, '⤴');
     return b;
   }
 
+  /** Discovery → crate: loading an Archive find onto a deck promotes it. */
+  function maybeAutoPromote(t) {
+    if (autoPromoteArchive && t.source === 'archive' && settings.ingestUrl) {
+      promoteTrack(t).catch(() => { /* discovery must keep playing regardless */ });
+    }
+  }
+
   function renderSide() {
     for (let i = 0; i < tabs.length; i++) {
-      const key = ['charts', 'search', 'server', 'crate', 'nostr'][i];
+      const key = ['charts', 'search', 'server', 'discover', 'crate', 'nostr'][i];
       tabs[i].classList.toggle('on', key === tab);
     }
     clear(sideEl);
@@ -523,6 +637,35 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {} }) {
           ? h('div', { class: 'muted' }, new URL(settings.subsonicUrl).host)
           : h('div', { class: 'muted' }, 'Not configured — ⚙ settings.'),
       ));
+    } else if (tab === 'discover') {
+      sideEl.appendChild(h('div', { class: 'side-group' },
+        h('div', { class: 'side-h' }, 'Audius'),
+        audiusInput,
+        h('button', { class: 'btn btn-primary', onclick: runAudiusSearch }, 'Search'),
+        chip('🔥 Trending', runAudiusTrending),
+      ));
+      const jm = h('div', { class: 'side-group' },
+        h('div', { class: 'side-h' }, 'Jamendo (CC)'),
+        jamendoInput,
+        h('button', { class: 'btn btn-primary', onclick: runJamendoSearch, disabled: !jamendoConfigured(settings) }, 'Search'),
+      );
+      if (!jamendoConfigured(settings)) {
+        jm.appendChild(h('div', { class: 'muted jamendo-hint' }, 'Needs a free client_id — ⚙ settings.'));
+      }
+      sideEl.appendChild(jm);
+      const ar = h('div', { class: 'side-group' },
+        h('div', { class: 'side-h' }, 'Archive.org'),
+        archiveInput,
+        h('button', { class: 'btn btn-primary', onclick: runArchiveSearch }, 'Search'),
+        chip(autoPromoteArchive ? '⤴ AUTO→CRATE on' : '⤴ auto→crate off', () => {
+          autoPromoteArchive = !autoPromoteArchive;
+          renderSide();
+        }, autoPromoteArchive ? 'on' : ''),
+      );
+      for (const item of archiveItems.slice(0, 12)) {
+        ar.appendChild(chip(`💿 ${item.title.slice(0, 34)}`, () => openArchiveItem(item)));
+      }
+      sideEl.appendChild(ar);
     } else if (tab === 'nostr') {
       sideEl.appendChild(h('div', { class: 'side-group' },
         h('div', { class: 'side-h' }, 'Playlists (kind 30003)'),
