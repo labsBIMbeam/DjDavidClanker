@@ -1,6 +1,6 @@
 # Handoff — DJ David Clanker
 
-As of: August 13, 2026 · Status: **working, 197 E2E checks across 9 suites + 9 pytest green**
+As of: August 13, 2026 · Status: **working, 202 E2E checks across 9 suites + 9 pytest green**
 
 This document is for the person who touches the project next — whether that's
 you in three months or someone else. It describes what is built, **why it is
