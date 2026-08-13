@@ -451,6 +451,25 @@ punch macro combos (`macro:echo` …) besides the insert FX. The heuristic
 mode exercises the same action surface, which is how the dry run stays a
 meaningful test without credentials.
 
+**Publishing as a napplet** — audited, ready with known degradations. The
+artifact is a 172 KB single file whose sha256 matches the manifest's `path`
+and aggregate tags (rebuild regenerates both). Manifest `requires` tags are
+CAPABILITY domains (resource/storage/…), not HTTP hosts — which hosts
+`resource.bytes` may fetch is the shell's policy, so Wavlake/Audius/Archive
+/Navidrome need no manifest entries; a host may still prompt or refuse per
+domain. `media` is deliberately not declared: the app degrades cleanly
+without it and `requires` means required. To publish: host `dist/index.html`
+on a Blossom server and sign+publish the kind 35129 event the plugin emits
+(no CLI ships with @napplet — any Nostr signer works; the hashes are already
+in the manifest). Degradations in a strict host, all visible not silent:
+output-device picking and LINE IN need media permission the sandbox
+withholds; the ⤴ ingest upload is a direct POST that `connect-src 'none'`
+blocks (the button shows ✗ — a future `upload`-domain integration could
+carry it shell-mediated); Navidrome/ingest reachability depends on the
+host's fetch policy for private LAN hosts. The full experience lives in the
+devices-mode dev shell or standalone; the napplet build is the portable
+Wavlake/discovery player.
+
 Playwright is installed globally in this environment. If `node dev/smoke.mjs`
 can't find the package:
 

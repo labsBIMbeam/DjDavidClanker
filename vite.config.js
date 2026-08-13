@@ -16,7 +16,9 @@ export default defineConfig({
       nappletType: 'dj-david-clanker',
       title: 'DJ David Clanker',
       description:
-        'Two-deck DJ mixer for Wavlake music. Charts, search, artist sets and Nostr playlists, with per-track value4value zaps.',
+        'Two-deck auto-DJ: phrase-aligned transitions, key detection and smart track selection. '
+        + 'Wavlake value4value with per-track zaps, Nostr playlists, your own Subsonic/Navidrome '
+        + 'library, Audius and Archive.org discovery, local files, real scratching and macro FX.',
       artifactMode: 'single-file',
       requires: {
         infer: false,
