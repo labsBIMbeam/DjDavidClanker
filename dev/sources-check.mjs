@@ -262,6 +262,37 @@ try {
   check('LINE IN: disable stops the stream and the master goes quiet',
     lineOff.on === false && lineOff.peak < 0.005, `peak=${lineOff.peak.toFixed(4)}`);
 
+  /* ------------------------------- midi ------------------------------- */
+  // No hardware in CI: the exposed handle() drives the MPD218 factory map
+  // with raw messages, which is exactly what an input port would deliver.
+
+  const midi = await frame.evaluate(async () => {
+    const dj = window.__djclanker;
+    const before = {
+      playing: dj.decks.A.playing,
+      fxOn: dj.decks.A.fx[dj.decks.A.fxSlots[0]] ? dj.decks.A.fx[dj.decks.A.fxSlots[0]].on : false,
+      automix: dj.automix.enabled,
+    };
+    dj.midi.handle([0x90, 36, 100]); // pad 1: deck A play toggle
+    const played = dj.decks.A.playing !== before.playing;
+    dj.midi.handle([0x90, 36, 100]); // toggle back
+    dj.midi.handle([0xb0, 3, 127]); // K1 full right → crossfader +1
+    const xfRight = dj.mixer.crossfader;
+    dj.midi.handle([0xb0, 3, 64]); // detent-ish middle
+    dj.midi.handle([0xb0, 9, 127]); // K2 → master 1
+    const master = dj.mixer.master;
+    dj.midi.handle([0x90, 45, 100]); // pad 10 down: A FX slot 1 punch in
+    const fxDown = dj.decks.A.fx[dj.decks.A.fxSlots[0]].on;
+    dj.midi.handle([0x80, 45, 0]); // pad 10 up: punch out
+    const fxUp = dj.decks.A.fx[dj.decks.A.fxSlots[0]].on;
+    dj.midi.handle([0xb0, 9, 108]); // master back to a sane level
+    return { played, xfRight, master, fxDown, fxUp };
+  });
+  check('MIDI: pad 1 toggles deck A transport', midi.played === true);
+  check('MIDI: K1/K2 drive crossfader and master', midi.xfRight === 1 && midi.master === 1,
+    `xf=${midi.xfRight} master=${midi.master}`);
+  check('MIDI: FX pad is momentary (hold to ride)', midi.fxDown === true && midi.fxUp === false);
+
   await page.screenshot({ path: `${OUT}-server.png`, fullPage: true });
 } finally {
   await browser.close();

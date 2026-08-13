@@ -462,6 +462,18 @@ punch macro combos (`macro:echo` …) besides the insert FX. The heuristic
 mode exercises the same action surface, which is how the dry run stays a
 meaningful test without credentials.
 
+**MIDI (MPD218)** — `src/lib/midi.js` maps the Akai MPD218 factory defaults
+(pads bank A notes 36–51, knob CCs 3/9/12/13/14/15) onto the performance
+surface; the layout lives as a comment at the top of the file: bottom pad
+row = transport (A play/cue · B cue/play), row 2 = SYNC/DROP mirrored, row 3
+= LOOP-4 and momentary FX punches (hold to ride — macros included), top row
+= scratch/backspin, AUTOMIX, next ⏭. Knobs: K1 crossfader, K2 master,
+K3/K4 deck A macro+filter, K5/K6 deck B. Connection is attempted at boot
+(toast lists the input names) and hot-plugs via statechange; everything is
+channel-agnostic. WebMIDI needs a real origin plus a permission grant —
+devices-mode shell or standalone in a real browser; the E2E drives the map
+through the exposed `midi.handle()` with raw messages instead of hardware.
+
 **Publishing as a napplet** — audited, ready with known degradations. The
 artifact is a 172 KB single file whose sha256 matches the manifest's `path`
 and aggregate tags (rebuild regenerates both). Manifest `requires` tags are
