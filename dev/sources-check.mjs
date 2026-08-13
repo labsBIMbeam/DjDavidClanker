@@ -282,22 +282,28 @@ try {
     dj.midi.handle([0xb0, 15, 127]); // K6 → cue volume 1
     const cue = dj.mixer.cueVolume;
     dj.midi.handle([0xb0, 3, 0]); // K1 hard left → deck A lowpass
+    dj.midi.handle([0xb0, 12, 110]); // K3 right → deck A macro (dub echo over HP)
     const filt = dj.decks.A.filter;
-    const fltUi = document.querySelector('.deck-top.deck-A .flt-text');
-    await new Promise((r) => setTimeout(r, 120)); // one UI tick for the readout
+    const fltUi = document.querySelector('.deck-top.deck-A .flt-scope:not(.mcr-scope) .flt-text');
+    const mcrUi = document.querySelector('.deck-top.deck-A .mcr-text');
+    await new Promise((r) => setTimeout(r, 120)); // one UI tick for the readouts
     const fltLabel = fltUi ? fltUi.textContent : '';
+    const mcrLabel = mcrUi ? mcrUi.textContent : '';
     dj.midi.handle([0xb0, 3, 64]); // filter back to neutral-ish
+    dj.midi.handle([0xb0, 12, 64]); // macro back to detent
     dj.midi.handle([0x90, 45, 100]); // pad 10 down: A FX slot 1 punch in
     const fxDown = dj.decks.A.fx[dj.decks.A.fxSlots[0]].on;
     dj.midi.handle([0x80, 45, 0]); // pad 10 up: punch out
     const fxUp = dj.decks.A.fx[dj.decks.A.fxSlots[0]].on;
-    return { played, xfRight, cue, filt, fltLabel, fxDown, fxUp };
+    return { played, xfRight, cue, filt, fltLabel, mcrLabel, fxDown, fxUp };
   });
   check('MIDI: pad 1 toggles deck A transport', midi.played === true);
   check('MIDI: K5/K6 drive crossfader and cue volume', midi.xfRight === 1 && midi.cue === 1,
     `xf=${midi.xfRight} cue=${midi.cue}`);
   check('MIDI: K1 drives the filter and the readout shows it',
     midi.filt === -1 && midi.fltLabel.startsWith('LP'), `${midi.filt} · "${midi.fltLabel}"`);
+  check('MIDI: K3 drives the macro and the echo readout shows it',
+    midi.mcrLabel.startsWith('HP DUB ECHO'), `"${midi.mcrLabel}"`);
   check('MIDI: FX pad is momentary (hold to ride)', midi.fxDown === true && midi.fxUp === false);
 
   await page.screenshot({ path: `${OUT}-server.png`, fullPage: true });

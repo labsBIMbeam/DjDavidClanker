@@ -1,6 +1,6 @@
 # Handoff — DJ David Clanker
 
-As of: August 13, 2026 · Status: **working, 205 E2E checks across 9 suites + 9 pytest green**
+As of: August 13, 2026 · Status: **working, 206 E2E checks across 9 suites + 9 pytest green**
 
 This document is for the person who touches the project next — whether that's
 you in three months or someone else. It describes what is built, **why it is
@@ -604,6 +604,7 @@ Interactions with non-obvious behavior:
 | FX slot dropdown | picks which of the 5 effects the button (or F/G/H/J) toggles; picking the other slot's effect swaps the slots |
 | 🎧 (on the channel) | pre-fader listen on the cue bus (keys E/I) |
 | 🔈 (in the mixer) | "🔈 Audio outputs" menu: master and headphone device, applies immediately; "Reveal device names" fetches the labels via a media permission |
+| Performance readouts (cluster, under BASE/SYNC/DROP) | two booth-readable bipolar bars per deck, driven from engine truth each frame so MIDI knobs show live: channel filter (K1/K2 — side + corner frequency, "LP 703 Hz") and macro combo (K3/K4 — side + combo + amount, "HP DUB ECHO 76%"). The cluster grid deliberately overrides the legacy four-column `.deck-body` rule — that rule once squeezed the performance column to 131 px |
 | Kill buttons (HI/MID/LOW) | toggle to −26 dB and back to 0 |
 | Level meters | classic segmented meters (channel horizontal under the wave, master vertical mid-stage): fire palette, red overshoot ≥ 0.9 with clip latch and peak hold. They replaced the oscilloscope scopes |
 | Beat-loop buttons | second press on the same length exits the loop |

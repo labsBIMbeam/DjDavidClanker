@@ -142,6 +142,35 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
   );
   const fmtHz = (hz) => (hz >= 1000 ? `${(hz / 1000).toFixed(1)} kHz` : `${Math.round(hz)} Hz`);
 
+  // Macro readout, same big-bar language as the filter: the MIDI knobs
+  // (K3/K4) drive the macro blind, so its position and combo name must be
+  // readable from across the room too.
+  const mcrFill = h('div', { class: 'flt-fill' });
+  const mcrText = h('span', { class: 'flt-text mcr-text' }, '—');
+  const mcrScope = h('div', { class: 'flt-scope mcr-scope', title: 'Macro FX position (MIDI K3/K4)' },
+    h('span', { class: 'flt-side' }, 'LP'),
+    h('div', { class: 'flt-track' }, mcrFill),
+    h('span', { class: 'flt-side' }, 'HP'),
+    mcrText,
+  );
+
+  function tickMacro() {
+    const v = deck.macro.value;
+    const x = Math.abs(v);
+    if (x <= 0.06) {
+      mcrFill.style.width = '0%';
+      if (mcrText.textContent !== '—') mcrText.textContent = '—';
+      mcrScope.classList.remove('hot');
+      return;
+    }
+    mcrFill.style.width = `${Math.round(x * 50)}%`;
+    mcrFill.style.left = v < 0 ? `${50 - x * 50}%` : '50%';
+    mcrScope.classList.add('hot');
+    // Same word order as the filter readout: side first, then the value.
+    const label = `${v < 0 ? 'LP' : 'HP'} ${MACRO_LABELS[deck.macro.type] || 'MACRO'} ${Math.round(x * 100)}%`;
+    if (mcrText.textContent !== label) mcrText.textContent = label;
+  }
+
   function tickFilter() {
     const v = deck.filter;
     const x = Math.abs(v);
@@ -161,7 +190,11 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
   }
 
   const meterRow = h('div', { class: 'deck-meter' },
-    h('span', { class: 'lbl-sub' }, 'LEVEL'), meter.canvas, fltScope);
+    h('span', { class: 'lbl-sub' }, 'LEVEL'), meter.canvas);
+
+  // The two performance readouts side by side, big enough for the booth:
+  // channel filter (MIDI K1/K2) and macro combo (K3/K4).
+  const perfScopes = h('div', { class: 'perf-scopes' }, fltScope, mcrScope);
 
   const btnPlay = h('button', { class: 'btn btn-play', title: 'Play / pause (space)' }, '▶');
   const btnCue = h('button', { class: 'btn btn-cue', title: 'Set cue / jump to cue' }, 'CUE');
@@ -615,6 +648,7 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
         btnSync,
         btnDrop,
       ),
+      perfScopes,
       hotCueRow,
       loopRow,
       fxSection,
@@ -975,6 +1009,7 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
     // Cheap DOM state first, canvases last: a throwing draw must never take
     // the control readouts down with it (it did once, via a platter draw).
     tickFilter();
+    tickMacro();
 
     // The disc is drawn from the real rate, so brake, backspin and
     // hand-scratch all read correctly instead of a fixed CSS spin.

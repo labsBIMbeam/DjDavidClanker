@@ -235,6 +235,17 @@ html, body {
 }
 .deck-main { display: flex; flex-direction: column; gap: 10px; }
 .deck-cluster { display: grid; grid-template-columns: auto 1fr; gap: 14px; }
+/* The cluster keeps the legacy deck-body class for suite selectors, but the
+   old four-column deck grid (jog · tempo · eq · chan, 585) must not size it:
+   two columns, the performance side takes the room. */
+.deck-main .deck-cluster {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas: none;
+  gap: 12px;
+  align-items: start;
+}
+
 /* Jog column + pitch column side by side — scoped to beat the legacy
    .deck-jog flex rule further down. */
 .deck-main .cluster-left {
@@ -242,6 +253,11 @@ html, body {
   gap: 10px; align-items: start; justify-items: center;
 }
 .jog-main { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+/* Keep the jog column at platter width: the scratch row wraps (buttons on
+   one line, the pattern book below) instead of stretching the whole column. */
+.deck-main .jog-main .scratch-row {
+  flex-wrap: wrap; max-width: 182px; justify-content: center; row-gap: 4px;
+}
 .deck-main .pitch-box { padding-top: 8px; }
 .cluster-right { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .perf-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
@@ -385,6 +401,29 @@ html, body {
   letter-spacing: .08em; white-space: nowrap; overflow: hidden;
   text-overflow: ellipsis; max-width: 220px;
 }
+
+/* Booth-readable performance readouts: filter + macro side by side in the
+   cluster, driven by the MIDI knobs. Overrides the small legacy .flt-* rules
+   by specificity, not position. */
+.perf-scopes {
+  display: grid; grid-template-columns: 1fr; gap: 6px;
+  padding: 4px 0; width: 100%;
+}
+/* The legacy .flt-scope carries flex:none for its meter-row life — as a
+   grid item here it must stretch to the full row instead. */
+.perf-scopes .flt-scope { gap: 8px; width: 100%; justify-self: stretch; }
+.perf-scopes .flt-track {
+  width: auto; flex: 1; height: 22px; border-radius: 4px;
+  background: #14100c; border-color: #3a2f22;
+}
+.perf-scopes .flt-fill { top: 3px; bottom: 3px; }
+.perf-scopes .flt-text {
+  font-size: 13px; min-width: 124px; text-align: right;
+  letter-spacing: .04em; white-space: nowrap;
+}
+.perf-scopes .flt-side { font-size: 10px; }
+.perf-scopes .mcr-scope.hot .flt-fill { background: #ff6a00; box-shadow: 0 0 10px rgba(255, 106, 0, 0.55); }
+.perf-scopes .mcr-scope.hot .flt-text { color: #ff8a3c; }
 
 /* The scratch book: full pattern library behind the quick buttons. */
 .scratch-sel {
