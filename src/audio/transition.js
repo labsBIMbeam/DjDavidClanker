@@ -67,6 +67,9 @@ export function planTransition(live, idle, { style = 'auto', fadeSeconds = 12 } 
   if (style === 'fade') return fade('forced by config');
   if (style === 'echo') return planEcho(live, idle, reasons);
   if (liveConf < 0.35 || idleConf < 0.35) return fade('structure confidence low');
+  // A drifting tempo (live recording, vinyl rip) makes the extrapolated
+  // phrase grid a lie — the DP beat tracker measured it, believe it.
+  if ((live.driftPct || 0) > 2 || (idle.driftPct || 0) > 2) return fade('tempo drifts');
 
   const endsHot = ls.sections[ls.sections.length - 1].kind !== 'outro';
   if (style === 'cut' || (style === 'auto' && endsHot)) {

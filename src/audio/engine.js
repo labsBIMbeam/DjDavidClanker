@@ -222,6 +222,8 @@ export class Deck extends Emitter {
     this.bpmManual = false;
     this.beatOffset = null;
     this.barOffset = null;
+    this.beatTimes = null;
+    this.driftPct = 0;
     this.structure = null;
     this.musicalKey = null;
     this._analysisFromCache = false;
@@ -367,6 +369,7 @@ export class Deck extends Emitter {
         this.bpmConfidence = cached.cf || 0;
         this.beatOffset = Number.isFinite(cached.bo) ? cached.bo : null;
         this.barOffset = Number.isFinite(cached.ro) ? cached.ro : null;
+        this.driftPct = cached.dp || 0; // beat TIMES are not cached, the scalar is
         if (cached.k && cached.k[0] >= 0) {
           this.musicalKey = keyObject(cached.k[0], cached.k[1] === 0 ? 'major' : 'minor', cached.k[2] || 0);
         }
@@ -380,6 +383,8 @@ export class Deck extends Emitter {
         }
         this.beatOffset = Number.isFinite(res.beatOffset) ? res.beatOffset : null;
         this.barOffset = Number.isFinite(res.barOffset) ? res.barOffset : null;
+        this.beatTimes = res.beatTimes && res.beatTimes.length ? res.beatTimes : null;
+        this.driftPct = res.driftPct || 0;
         this.emit('bpm');
       }
 
@@ -411,6 +416,7 @@ export class Deck extends Emitter {
           cf: this.bpmConfidence,
           bo: this.beatOffset,
           ro: this.barOffset,
+          dp: this.driftPct,
           ld: this.loudness,
           k: this.musicalKey
             ? [this.musicalKey.pitchClass, this.musicalKey.mode === 'major' ? 0 : 1,

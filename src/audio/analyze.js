@@ -272,6 +272,41 @@ export async function detectBpm(buffer) {
     }
   }
 
+  // v4: dynamic-programming beat tracking (Ellis-style) on top of the comb
+  // estimate. The comb+fine search nails a single static tempo; the DP walks
+  // the envelope beat by beat, so drifting material (live recordings, vinyl
+  // rips) yields real beat TIMES and a drift measure instead of a lie.
+  // (`periodF` is the downbeat vote's period, declared above.)
+  const beatFrames = dpBeats(env, periodF);
+  const beatTimes = beatFrames.map((f) => skip + (f * HOP) / SR);
+  // Drift = |slope| of a least-squares line over the beat intervals, scaled
+  // to the whole window. Intervals are quantized to whole envelope frames
+  // (a 41.67-frame period reads as mixed 41s and 42s), so percentile spread
+  // would report ~2.4% on a rock-steady track; the regression slope averages
+  // that zero-mean noise away and captures the monotonic glide that matters.
+  let driftPct = 0;
+  if (beatFrames.length > 16) {
+    const iv = [];
+    for (let i = 1; i < beatFrames.length; i++) iv.push(beatFrames[i] - beatFrames[i - 1]);
+    const m = iv.length;
+    let mx = 0;
+    let my = 0;
+    for (let i = 0; i < m; i++) {
+      mx += i;
+      my += iv[i];
+    }
+    mx /= m;
+    my /= m;
+    let num = 0;
+    let den = 0;
+    for (let i = 0; i < m; i++) {
+      num += (i - mx) * (iv[i] - my);
+      den += (i - mx) ** 2;
+    }
+    const slope = den > 0 ? num / den : 0;
+    if (my > 0) driftPct = Math.round(Math.abs((slope * (m - 1)) / my) * 1000) / 10;
+  }
+
   const beatOffset = skip + (best.phase * HOP) / SR;
   const candidates = scored
     .sort((a, b) => b.s - a.s)
@@ -284,7 +319,60 @@ export async function detectBpm(buffer) {
     beatOffset,
     barOffset: beatOffset + downbeatClass * (60 / best.bpm),
     candidates,
+    beatTimes,
+    driftPct,
   };
+}
+
+/**
+ * Ellis-style dynamic-programming beat tracker: every envelope frame scores
+ * as onset strength plus the best predecessor half to one-and-a-half periods
+ * back, minus a log-squared penalty for deviating from the nominal period.
+ * Backtracking from the best endpoint yields the beat frame sequence. The
+ * penalty weight is tuned so a few-percent glide costs less than a weak
+ * onset (drift is followed) while octave jumps stay prohibitive.
+ */
+function dpBeats(env, periodF) {
+  const n = env.length;
+  const lo = Math.max(2, Math.floor(periodF * 0.5));
+  const hi = Math.min(n - 1, Math.ceil(periodF * 1.5));
+  if (n < hi + 2) return [];
+  const ALPHA = 120;
+  const score = new Float32Array(n);
+  const from = new Int32Array(n).fill(-1);
+  for (let i = 0; i < n; i++) score[i] = env[i];
+  for (let i = lo; i < n; i++) {
+    let bestS = -Infinity;
+    let bestJ = -1;
+    const a = Math.max(0, i - hi);
+    const b = i - lo;
+    for (let j = a; j <= b; j++) {
+      const dev = Math.log((i - j) / periodF);
+      const s = score[j] - ALPHA * dev * dev;
+      if (s > bestS) {
+        bestS = s;
+        bestJ = j;
+      }
+    }
+    if (bestJ >= 0 && bestS > 0) {
+      score[i] = env[i] + bestS;
+      from[i] = bestJ;
+    }
+  }
+  let end = n - 1;
+  let bestEnd = -Infinity;
+  for (let i = Math.max(0, n - 2 * Math.ceil(periodF)); i < n; i++) {
+    if (score[i] > bestEnd) {
+      bestEnd = score[i];
+      end = i;
+    }
+  }
+  const beats = [];
+  for (let i = end; i >= 0; i = from[i]) {
+    beats.push(i);
+    if (from[i] < 0) break;
+  }
+  return beats.reverse();
 }
 
 /**
