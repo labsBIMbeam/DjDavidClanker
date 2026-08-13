@@ -58,11 +58,16 @@ const ALLOW_HOSTS = [
 // allowlist via env: EXTRA_PROXY_HOSTS="music.example.org,127.0.0.1".
 const EXTRA_HOSTS = (process.env.EXTRA_PROXY_HOSTS || '')
   .split(',').map((s) => s.trim()).filter(Boolean);
-const hostAllowed = (h) => ALLOW_HOSTS.some((re) => re.test(h)) || EXTRA_HOSTS.includes(h);
+// Loopback is always fair game in a dev shell: the ingest service and a
+// local Navidrome live there, and requiring an env var to reach your own
+// machine made the ⤴ promote button silently dead on a plain `npm run shell`.
+const LOOPBACK = ['127.0.0.1', 'localhost', '[::1]'];
+const hostAllowed = (h) => ALLOW_HOSTS.some((re) => re.test(h))
+  || EXTRA_HOSTS.includes(h) || LOOPBACK.includes(h);
 // http: is acceptable for loopback and RFC1918-style LAN servers — that is
 // exactly where a self-hosted Navidrome lives.
 const protoAllowed = (u) => u.protocol === 'https:'
-  || (u.protocol === 'http:' && EXTRA_HOSTS.includes(u.hostname));
+  || (u.protocol === 'http:' && (EXTRA_HOSTS.includes(u.hostname) || LOOPBACK.includes(u.hostname)));
 
 const send = (res, code, type, body, extra = {}) => {
   res.writeHead(code, { 'content-type': type, 'access-control-allow-origin': '*', ...extra });
