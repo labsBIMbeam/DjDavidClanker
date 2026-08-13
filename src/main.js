@@ -561,6 +561,32 @@ function frame(now) {
 }
 requestAnimationFrame(frame);
 
+// Hidden-tab fallback: browsers stall requestAnimationFrame in background
+// tabs, and with it every scheduled transition, gate and platter motor. A
+// coarse interval keeps the AUDIO state machines running while hidden — the
+// UI ticks stay skipped, nobody is looking. 100 ms is fine: the schedulers
+// plan ~0.4 s ahead and crossfader steps at 10 Hz stay unobtrusive.
+let bgTimer = 0;
+let bgLast = 0;
+mixer.bgTicks = 0;
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && !bgTimer) {
+    bgLast = performance.now();
+    bgTimer = setInterval(() => {
+      const now = performance.now();
+      const dt = Math.min(0.3, (now - bgLast) / 1000);
+      bgLast = now;
+      mixer.bgTicks++;
+      mixer.tickAudio();
+      automix.tick(dt);
+    }, 100);
+  } else if (!document.hidden && bgTimer) {
+    clearInterval(bgTimer);
+    bgTimer = 0;
+    lastFrame = 0; // the rAF dt restarts clean instead of spanning the gap
+  }
+});
+
 /* ------------------------------ boot ------------------------------ */
 
 (async function boot() {

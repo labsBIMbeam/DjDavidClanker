@@ -290,9 +290,13 @@ Guards worth knowing: the SYNC latch pauses while a scheduled start is armed
 DROP on the idle deck makes the automix stay on the legacy fader ride; the
 preload lead is measured to the MIX-OUT point, not the track end — measured
 to the end it systematically starved every track with a real outro into the
-fade fallback (45 s keeps a full phrase of headroom). Hidden tab: scheduled
-starts still fire (the audio clock runs), fader rides freeze — documented,
-not solved.
+fade fallback (45 s keeps a full phrase of headroom). Hidden tab: SOLVED —
+a 100 ms interval takes over the audio state machines (tickAudio +
+automix.tick) whenever the document goes hidden, and `play()` starts like a
+CDJ instead of waiting on the stalled vinyl motor; the UI ticks stay
+skipped. The fallback tears down on visibilitychange back. (The E2E fakes
+`document.hidden` — it asserts the branch logic, not real rAF throttling,
+which headless Chromium does not reproduce.)
 
 **Macro FX** (`src/audio/macrofx.js`) is the Traktor "Mixer FX" idea: one
 bipolar knob per channel drives a tuned effect+filter combination — left
