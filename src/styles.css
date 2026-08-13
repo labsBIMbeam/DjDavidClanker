@@ -201,6 +201,9 @@ input[type=range].fader-v.master { height: auto; align-self: stretch; }
 }
 .xf-row .crossfader { flex: 2; }
 .xf-row .cuevol { flex: 1; max-width: 160px; }
+.line-box { display: flex; gap: 4px; align-items: center; }
+.line-box .linevol { width: 90px; }
+.btn-line.bad { color: var(--bad); border-color: var(--bad); }
 .xf-end { font-family: var(--display); font-size: 15px; opacity: .4; transition: opacity .15s; }
 .xf-end-a { color: var(--a); }
 .xf-end-b { color: var(--b); }

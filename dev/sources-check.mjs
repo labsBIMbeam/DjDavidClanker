@@ -53,11 +53,20 @@ await waitPort(`${MOCK}/rest/ping`);
 await waitPort(BASE);
 
 const browser = await chromium.launch({
-  args: ['--autoplay-policy=no-user-gesture-required', '--no-sandbox'],
+  args: [
+    '--autoplay-policy=no-user-gesture-required',
+    '--no-sandbox',
+    // Fake media input: Chromium synthesizes a tone, so LINE IN is audible
+    // and assertable without hardware; fake UI auto-grants the permission.
+    '--use-fake-device-for-media-stream',
+    '--use-fake-ui-for-media-stream',
+  ],
 });
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1200 } });
-  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  // devices mode: getUserMedia needs a real origin (see HANDOFF on the
+  // sandbox); every other code path under test is identical either way.
+  await page.goto(`${BASE}/?devices=1`, { waitUntil: 'domcontentloaded' });
   const frame = await (await page.waitForSelector('#frame')).contentFrame();
   await frame.waitForSelector('.deck-A', { timeout: 15000 });
 
@@ -210,6 +219,48 @@ try {
   await frame.evaluate(() => {
     window.__djclanker.decks.B.stop();
   });
+
+  /* ------------------------------ line in ------------------------------ */
+
+  await frame.evaluate(() => {
+    window.__djclanker.decks.A.pause();
+    window.__djclanker.decks.B.stop();
+  });
+  await frame.locator('.btn-line').click();
+  await frame.waitForFunction(() => window.__djclanker.mixer.lineIn.on,
+    undefined, { timeout: 15000 });
+  const lineLevel = await frame.evaluate(async () => {
+    const mx = window.__djclanker.mixer;
+    let peak = 0;
+    for (let i = 0; i < 25; i++) {
+      peak = Math.max(peak, mx.masterLevel());
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    return peak;
+  });
+  check('LINE IN: fake input is audible on the master with both decks silent',
+    lineLevel > 0.01, `peak=${lineLevel.toFixed(3)}`);
+
+  await frame.locator('.btn-line-low').click();
+  const low = await frame.evaluate(() => ({
+    setting: window.__djclanker.mixer.lineIn.low,
+    param: window.__djclanker.mixer._line.low.gain.value,
+  }));
+  check('LINE IN: bass kill drops the shelf to −26 dB', low.setting === -26 && low.param === -26);
+
+  await frame.locator('.btn-line').click();
+  const lineOff = await frame.evaluate(async () => {
+    const mx = window.__djclanker.mixer;
+    await new Promise((r) => setTimeout(r, 300));
+    let peak = 0;
+    for (let i = 0; i < 10; i++) {
+      peak = Math.max(peak, mx.masterLevel());
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    return { on: mx.lineIn.on, peak };
+  });
+  check('LINE IN: disable stops the stream and the master goes quiet',
+    lineOff.on === false && lineOff.peak < 0.005, `peak=${lineOff.peak.toFixed(4)}`);
 
   await page.screenshot({ path: `${OUT}-server.png`, fullPage: true });
 } finally {

@@ -1325,6 +1325,8 @@ export class Mixer extends Emitter {
     this.cueVolume = 0.9;
     this.cueAvailable = false;
     this.outputs = { master: '', cue: '' };
+    this.lineIn = { on: false, volume: 1, low: 0 };
+    this._line = null;
     this.decks = {};
     this.decks.A = new Deck(this, 'A');
     this.decks.B = new Deck(this, 'B');
@@ -1384,6 +1386,67 @@ export class Mixer extends Emitter {
     this.cueVolume = clamp(v, 0, 1);
     if (this.cueGain) this.cueGain.gain.value = this.cueVolume;
     this.emit('cue');
+  }
+
+  /**
+   * LINE IN — a live input (virtual cable, phone, turntable preamp) as a
+   * third channel into the master: gain + a bass-kill shelf, no deck. A live
+   * MediaStream cannot seek, scratch or be analyzed ahead, so a deck is the
+   * wrong shape for it. Browser processing (echo cancellation, noise
+   * suppression, AGC) is disabled — this is music, not a phone call.
+   * Needs media permission, i.e. the devices-mode shell or standalone.
+   */
+  async enableLineIn(deviceId) {
+    this.ensureContext();
+    this.resumeAudio();
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+        ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+      },
+    });
+    this.disableLineIn();
+    const src = this.ctx.createMediaStreamSource(stream);
+    const low = this.ctx.createBiquadFilter();
+    low.type = 'lowshelf';
+    low.frequency.value = 250;
+    low.gain.value = this.lineIn.low;
+    const gain = this.ctx.createGain();
+    gain.gain.value = this.lineIn.volume;
+    src.connect(low);
+    low.connect(gain);
+    gain.connect(this.masterGain);
+    this._line = { stream, src, low, gain };
+    this.lineIn.on = true;
+    this.emit('linein');
+    return true;
+  }
+
+  disableLineIn() {
+    if (!this._line) return;
+    for (const t of this._line.stream.getTracks()) t.stop();
+    try {
+      this._line.src.disconnect();
+      this._line.gain.disconnect();
+    } catch { /* already gone */ }
+    this._line = null;
+    this.lineIn.on = false;
+    this.emit('linein');
+  }
+
+  setLineVolume(v) {
+    this.lineIn.volume = clamp(v, 0, 2);
+    if (this._line) this._line.gain.gain.value = this.lineIn.volume;
+    this.emit('linein');
+  }
+
+  /** Bass kill for the line channel — same −26 dB convention as the deck EQ. */
+  setLineLow(db) {
+    this.lineIn.low = clamp(db, -26, 6);
+    if (this._line) this._line.low.gain.value = this.lineIn.low;
+    this.emit('linein');
   }
 
   /** All audio outputs the browser will let us see. Labels may need permission. */
