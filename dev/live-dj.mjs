@@ -36,7 +36,7 @@ try {
 const DECISION_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['commentary', 'action', 'fx'],
+  required: ['commentary', 'action', 'style', 'order', 'fx'],
   properties: {
     commentary: {
       type: 'string',
@@ -49,14 +49,24 @@ const DECISION_SCHEMA = {
       properties: {
         type: {
           type: 'string',
-          enum: ['keep', 'charts', 'search'],
-          description: 'keep = current list is fine; charts = load the top 40; search = steer toward `query`',
+          enum: ['keep', 'charts', 'search', 'server', 'audius', 'archive'],
+          description: 'keep = current list is fine; charts = Wavlake top 40; search = Wavlake search; server = your own crate (query optional, empty = random 30); audius = Audius (empty query = trending); archive = dig archive.org netlabels for `query` (finds auto-promote into the crate)',
         },
         query: {
           type: 'string',
-          description: 'When type=search: an artist name, genre or mood word for the Wavlake catalog. Else empty string.',
+          description: 'Search term for search/server/audius/archive. Empty string otherwise.',
         },
       },
+    },
+    style: {
+      type: 'string',
+      enum: ['', 'auto', 'blend', 'cut', 'echo', 'fade'],
+      description: 'Transition style override; empty = leave as is. auto plans per pair (default). Switch only with a musical reason.',
+    },
+    order: {
+      type: 'string',
+      enum: ['', 'smart', 'list', 'shuffle'],
+      description: 'Queue order; empty = leave as is. smart picks by key/BPM/energy continuity (recommended).',
     },
     fx: {
       anyOf: [
@@ -66,23 +76,33 @@ const DECISION_SCHEMA = {
           required: ['deck', 'effect'],
           properties: {
             deck: { type: 'string', enum: ['A', 'B'] },
-            effect: { type: 'string', enum: ['flanger', 'phaser', 'gater', 'echo', 'reverb'] },
+            effect: {
+              type: 'string',
+              enum: ['flanger', 'phaser', 'gater', 'echo', 'reverb',
+                'macro:echo', 'macro:space', 'macro:noise', 'macro:gate', 'macro:barber'],
+            },
           },
         },
         { type: 'null' },
       ],
-      description: 'Optionally ride one effect for a few bars on the live deck. Use sparingly.',
+      description: 'Optionally ride one effect for a few bars on the live deck. macro:* are the one-knob combos (punched in/out). Use sparingly.',
     },
   },
 };
 
-const SYSTEM = `You are DJ David Clanker, a robot DJ playing a live value4value set with Wavlake music
-(bitcoin-native artists, mostly electronic/rock/hip-hop). You control a real two-deck mixer.
-Your job each cycle: keep the browser list pointed at good music (automix pulls from it when
-the queue runs dry), drop one short MC line, and occasionally ride an effect on the live deck.
-Musical judgment: keep some flow between tracks, don't repeat artists back to back if avoidable,
-vary energy in arcs. Talk like a laconic club MC who happens to be a robot: warm, dry, no cringe,
-no hashtags, at most one emoji per ten lines.`;
+const SYSTEM = `You are DJ David Clanker, a robot DJ playing a live value4value set. You control a real
+two-deck mixer with a phrase-aware auto-DJ underneath: tracks are analyzed (BPM, Camelot key,
+structure), transitions land sample-accurately on phrase boundaries with a bass swap, and the
+SMART order picks harmonically compatible continuations from the queue on its own.
+Your sources, by role: Wavlake charts/search (bitcoin-native artists, zaps flow while you play),
+"server" = the crate — the curated home library; "audius" = spontaneous digging with a DJ-heavy
+catalog (empty query = trending); "archive" = archive.org netlabels — anything you play from
+there is automatically promoted into the crate for next time.
+Each cycle: keep the browser list pointed at good music (automix refills from it), drop one
+short MC line, occasionally ride an effect. The state shows each deck's Camelot key and the
+planned transition — prefer steering toward keys near the live deck's. Leave style=auto and
+order=smart unless you have a musical reason. Talk like a laconic club MC who happens to be a
+robot: warm, dry, no cringe, no hashtags, at most one emoji per ten lines.`;
 
 async function decideLLM(state) {
   const msg = await claude.beta.messages.create({
@@ -119,13 +139,16 @@ let heuristicTick = 0;
 
 function decideHeuristic(state) {
   heuristicTick++;
-  const action = state.queueLength < 3
-    ? (heuristicTick % 2 === 0 ? { type: 'charts', query: '' } : { type: 'search', query: 'zazawowow' })
-    : { type: 'keep', query: '' };
+  let action = { type: 'keep', query: '' };
+  if (state.queueLength < 3) action = { type: 'charts', query: '' };
+  else if (heuristicTick % 6 === 2) action = { type: 'audius', query: '' };
+  else if (heuristicTick % 6 === 4) action = { type: 'server', query: '' };
   return {
     commentary: CANNED[heuristicTick % CANNED.length],
     action,
-    fx: heuristicTick % 4 === 0 ? { deck: state.liveDeck || 'A', effect: 'echo' } : null,
+    style: '',
+    order: heuristicTick === 1 ? 'smart' : '',
+    fx: heuristicTick % 4 === 0 ? { deck: state.liveDeck || 'A', effect: 'macro:echo' } : null,
   };
 }
 
@@ -133,28 +156,38 @@ function decideHeuristic(state) {
 
 async function gatherState(frame) {
   return frame.evaluate(() => {
-    const { decks, automix, mixer, browser } = window.__djclanker;
+    const { decks, automix, mixer, browser, analysisCache } = window.__djclanker;
     const deck = (d) => ({
       title: d.track ? d.track.title : null,
       artist: d.track ? d.track.artist : null,
       bpm: d.effectiveBpm ? Math.round(d.effectiveBpm * 10) / 10 : null,
+      key: d.musicalKey ? d.musicalKey.camelot : null,
+      structureConfidence: d.structure && d.structure.ok
+        ? Math.round(d.structure.confidence * 100) / 100 : null,
       playing: d.playing,
       remainingSec: d.duration ? Math.round(d.duration - d.position) : null,
     });
+    const status = automix.describe();
     return {
       deckA: deck(decks.A),
       deckB: deck(decks.B),
       liveDeck: automix.liveId || null,
       automixOn: automix.enabled,
+      transition: { style: automix.transitionStyle, order: automix.order, plan: status.detail || status.label },
+      lastTransition: automix.lastTransition ? automix.lastTransition.style : null,
       queueLength: automix.queue.length,
       crossfader: Math.round(mixer.crossfader * 100) / 100,
-      browserList: browser.currentItems().slice(0, 12).map((t) => `${t.artist} – ${t.title}`),
+      browserList: browser.currentItems().slice(0, 12).map((t) => {
+        const e = analysisCache.getAnalysis(analysisCache.trackCacheId(t));
+        const tag = e && e.bpm ? ` [${Math.round(e.bpm)}]` : '';
+        return `${t.artist} – ${t.title}${tag}`;
+      }),
     };
   });
 }
 
 async function runSearch(frame, query) {
-  await frame.locator('.tab').nth(1).click();
+  await frame.locator('.tab', { hasText: 'Search' }).click();
   await frame.locator('.search-input').first().fill(query);
   await frame.locator('.side-group .btn-primary').click();
   await frame.locator('.browser-h1', { hasText: `Search: ${query}` }).waitFor({ timeout: 20000 }).catch(() => {});
@@ -168,11 +201,48 @@ async function runSearch(frame, query) {
 }
 
 async function applyDecision(page, frame, decision) {
-  if (decision.action.type === 'charts') {
+  const a = decision.action;
+  if (a.type === 'charts') {
     await frame.locator('.tab').first().click();
     await frame.waitForTimeout(2500);
-  } else if (decision.action.type === 'search' && decision.action.query) {
-    await runSearch(frame, decision.action.query);
+  } else if (a.type === 'search' && a.query) {
+    await runSearch(frame, a.query);
+  } else if (a.type === 'server') {
+    await frame.locator('.tab', { hasText: 'Server' }).click();
+    if (a.query) {
+      await frame.locator('.server-search').fill(a.query);
+      await frame.locator('.server-search').press('Enter');
+    }
+    await frame.waitForTimeout(2500);
+  } else if (a.type === 'audius') {
+    await frame.locator('.tab', { hasText: 'Discover' }).click();
+    if (a.query) {
+      await frame.locator('.audius-search').fill(a.query);
+      await frame.locator('.side-group .btn-primary').first().click();
+    } else {
+      await frame.locator('.side-group .chip', { hasText: 'Trending' }).click();
+    }
+    await frame.waitForTimeout(3500);
+  } else if (a.type === 'archive' && a.query) {
+    await frame.locator('.tab', { hasText: 'Discover' }).click();
+    await frame.locator('.archive-search').fill(a.query);
+    await frame.locator('.side-group .btn-primary').nth(2).click();
+    // Items arrive as side chips; open the first find so tracks hit the list.
+    const item = frame.locator('.side-group .chip', { hasText: '💿' }).first();
+    await item.waitFor({ timeout: 30000 }).catch(() => {});
+    if (await item.count()) {
+      await item.click();
+      await frame.waitForTimeout(3000);
+    }
+  }
+
+  if (decision.style) {
+    await frame.evaluate((s) => { window.__djclanker.automix.transitionStyle = s; }, decision.style);
+    console.log(`[mix] transition style → ${decision.style}`);
+  }
+  if (decision.order) {
+    await frame.evaluate((o) => { window.__djclanker.automix.order = o; }, decision.order);
+    console.log(`[mix] queue order → ${decision.order}`);
   }
 
   if (decision.commentary) {
