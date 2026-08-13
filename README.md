@@ -80,8 +80,12 @@ network access to a host shell.
   sample-accurately on a phrase boundary at its mix-in point, kills its bass
   until the bass-swap phrase, keeps the phase latched and eases the
   crossfader; **ECHO** rides a dub tail out when the tempo gap is unreachable;
-  **CUT** drops on the phrase when a track ends hot; **FADE** is the old
-  crossfade and remains the fallback for anything uncertain
+  **CUT** drops on the phrase when a track ends hot; **SPINBACK** throws the
+  outgoing record hard backwards over the cut; **FADE** is the old crossfade
+  and remains the fallback for anything uncertain
+- AUTO carries a **seam budget**: roughly a quarter of handovers take an
+  audible exit (cut/echo/spinback) instead of an invisible blend — never the
+  same seam twice in a row. All blends goes flat; all cuts is exhausting
 - After every handover the tempo glides back to 0 % — a set never drifts
   sharp over the night
 - **SMART order** picks the next track by key compatibility, BPM closeness

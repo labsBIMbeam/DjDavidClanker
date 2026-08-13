@@ -65,6 +65,13 @@ export class Automix {
     this.plan = null; // planTransition() result for the staged idle deck
     this.transition = null; // a running Transition instance
     this.lastTransition = null; // telemetry of the last completed one
+    /**
+     * Seam budget (idea from PR #8): the share of auto handovers allowed an
+     * audible style (cut/echo/spinback) instead of an invisible blend. The
+     * last two seams are remembered so the same move never comes round twice.
+     */
+    this.markedRate = 0.25;
+    this._recentFlows = [];
     this.busy = false; // a load is in flight
     this.pending = null; // track staged on the idle deck
     this.lastError = '';
@@ -395,6 +402,7 @@ export class Automix {
     if (!this.plan && this.phraseAlign && idleStaged && idle._analysisDone && !userDrop) {
       this.plan = planTransition(live, idle, {
         style: this.transitionStyle, fadeSeconds: this.fadeSeconds,
+        markedRate: this.markedRate, recentFlows: this._recentFlows,
       });
       this._planTempo = live.tempo;
       this.onStatus('plan');
@@ -409,6 +417,10 @@ export class Automix {
           onCrossfade: this.onCrossfade,
           onDone: (telemetry) => {
             this.lastTransition = telemetry;
+            if (['cut', 'echo', 'spinback'].includes(telemetry.style)) {
+              this._recentFlows.push(telemetry.style);
+              if (this._recentFlows.length > 2) this._recentFlows.shift();
+            }
             this.transition = null;
             this._completeHandover(live, idle);
           },

@@ -320,6 +320,7 @@ async function runTransition({ nudgeXfMidway = false } = {}) {
           phaseSnapshot.latched = phaseSnapshot.latched || idle.syncedTo === live;
         }
       }
+      if (tr && live.autoScratch === 'backspin') debug.sawBackspin = true;
       if (nudge && tr && tr.state === 'OVERLAP' && !nudged && tr.telemetry.startedAt) {
         dj.mixer.setCrossfader(0.9 * (idle.id === 'A' ? -1 : 1)); // human grabs it
         nudged = true;
@@ -389,6 +390,46 @@ check('transition 2: crossfader yielded to the human hand',
   JSON.stringify(t2.debug));
 check('no cumulative pitch drift after two transitions', Math.abs(t2.newDeck.tempo) < 3.5,
   `tempo=${t2.newDeck.tempo.toFixed(2)}%`);
+
+/* ------------- part 2b: seam budget + spinback transition ------------- */
+
+// Wait for the next idle deck to be staged and analyzed — both the planner
+// dice below and the spinback cycle need a fully-known pair.
+await frame.waitForFunction(() => {
+  const am = window.__djclanker.automix;
+  const idle = am.idleDeck;
+  return idle && idle.status === 'ready' && idle._analysisDone && !am.busy
+    && am.staleId !== idle.id;
+}, undefined, { timeout: 180000 });
+
+// The planner's seam budget is pure and rng-injectable — assert the dice.
+const seam = await frame.evaluate(() => {
+  const dj = window.__djclanker;
+  const live = dj.automix.liveDeck;
+  const idle = dj.automix.idleDeck;
+  const opts = { style: 'auto', fadeSeconds: 12, markedRate: 0.25 };
+  return {
+    budgetHit: dj.planTransition(live, idle, { ...opts, recentFlows: [], rng: () => 0 }).style,
+    noRepeat: dj.planTransition(live, idle, { ...opts, recentFlows: ['spinback'], rng: () => 0 }).style,
+    budgetMiss: dj.planTransition(live, idle, { ...opts, recentFlows: [], rng: () => 0.9 }).style,
+  };
+});
+check('seam budget: a hit picks the first free marked style (spinback)',
+  seam.budgetHit === 'spinback', seam.budgetHit);
+check('seam budget: the previous seam is never repeated', seam.noRepeat === 'cut', seam.noRepeat);
+check('seam budget: a miss stays on the invisible blend', seam.budgetMiss === 'blend', seam.budgetMiss);
+
+// Full spinback cycle: force the style, run a third handover, and the
+// outgoing deck must ride its backspin out while the fader crosses.
+await frame.evaluate(() => { window.__djclanker.automix.transitionStyle = 'spinback'; });
+const t3 = await runTransition();
+check('transition 3: spinback style executes and hands over',
+  t3.handedOver && t3.telemetry && t3.telemetry.style === 'spinback',
+  t3.telemetry ? t3.telemetry.style : JSON.stringify(t3.debug));
+check('transition 3: the outgoing record actually spun back',
+  t3.debug.sawBackspin === true && t3.oldDeck.paused,
+  `sawBackspin=${t3.debug.sawBackspin} paused=${t3.oldDeck.paused}`);
+await frame.evaluate(() => { window.__djclanker.automix.transitionStyle = 'auto'; });
 
 await frame.evaluate(() => {
   const dj = window.__djclanker;

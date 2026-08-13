@@ -51,10 +51,10 @@ export function AutomixBar(automix, { onQueueFromBrowser, performer = null }) {
   };
   const btnSync = toggle('SYNC', () => automix.syncTempo, (v) => { automix.syncTempo = v; }, 'Pull the next deck onto the BPM before the transition');
 
-  const STYLES = ['auto', 'blend', 'cut', 'echo', 'fade'];
+  const STYLES = ['auto', 'blend', 'cut', 'echo', 'spinback', 'fade'];
   const btnStyle = h('button', {
     class: 'btn btn-mini',
-    title: 'Transition style: AUTO picks per pair · BLEND phrase-aligned bass swap · CUT on the phrase · ECHO tail exit · FADE legacy crossfade',
+    title: 'Transition style: AUTO picks per pair (with a seam budget) · BLEND phrase-aligned bass swap · CUT on the phrase · ECHO tail exit · SPINBACK hard rewind exit · FADE legacy crossfade',
     onclick: () => {
       automix.transitionStyle = STYLES[(STYLES.indexOf(automix.transitionStyle) + 1) % STYLES.length];
       render();

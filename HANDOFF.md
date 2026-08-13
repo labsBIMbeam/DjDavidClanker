@@ -600,6 +600,7 @@ Interactions with non-obvious behavior:
 | LOOP bar | IN/OUT for manual loops, 1/2/4/8 snap onto the beat grid, EXIT leaves. An active loop holds off the Automix transition |
 | 📁 LOCAL / drag & drop | local audio files into the list or straight onto a deck — always FULL mode, no zap target, not in the persistent playlist |
 | BPM display | large = effective (base × tempo fader), small editable = BASE |
+| Transition style button | cycles AUTO → BLEND → CUT → ECHO → SPINBACK → FADE. AUTO plans per pair and carries a 25 % seam budget (cut/echo/spinback instead of a blend, never the same seam twice); spinback throws the outgoing record backwards on the cut — its overlap progresses on the audio clock because the track position runs backwards |
 | FX slot dropdown | picks which of the 5 effects the button (or F/G/H/J) toggles; picking the other slot's effect swaps the slots |
 | 🎧 (on the channel) | pre-fader listen on the cue bus (keys E/I) |
 | 🔈 (in the mixer) | "🔈 Audio outputs" menu: master and headphone device, applies immediately; "Reveal device names" fetches the labels via a media permission |

@@ -17,8 +17,13 @@
  *     a control it is driving (expected-vs-actual comparison).
  *
  * Styles: blend (the above), cut (2-beat swap on the phrase), echo (dub-echo
- * tail masks a tempo jump the sync range cannot fold), fade (the legacy
- * automix crossfade — always the fallback, never removed).
+ * tail masks a tempo jump the sync range cannot fold), spinback (the outgoing
+ * record is spun hard backwards over the cut — the classic punctuation mark),
+ * fade (the legacy automix crossfade — always the fallback, never removed).
+ *
+ * Auto style carries a SEAM BUDGET (idea from PR #8): all blends goes flat,
+ * all cuts is exhausting — roughly a quarter of handovers are allowed an
+ * audible seam (cut/echo/spinback), never the same one twice in a row.
  */
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
@@ -27,7 +32,10 @@ const smoothstep = (x) => {
   return t * t * (3 - 2 * t);
 };
 
-export const TRANSITION_STYLES = ['auto', 'blend', 'cut', 'echo', 'fade'];
+export const TRANSITION_STYLES = ['auto', 'blend', 'cut', 'echo', 'spinback', 'fade'];
+
+/** The styles with an audible seam — what the seam budget draws from. */
+const MARKED_STYLES = ['spinback', 'cut', 'echo'];
 
 /** Can `idle` reach `targetBpm` with its pitch fader (same folds as syncTo)? */
 function syncReachable(idle, targetBpm) {
@@ -44,7 +52,13 @@ function syncReachable(idle, targetBpm) {
  * Returns a plan object; style 'fade' means "use the legacy crossfade path".
  * First matching rule wins — every uncertain case degrades to fade.
  */
-export function planTransition(live, idle, { style = 'auto', fadeSeconds = 12 } = {}) {
+export function planTransition(live, idle, {
+  style = 'auto', fadeSeconds = 12,
+  // Seam budget: chance an auto handover takes an audible style instead of a
+  // blend. 0 keeps the planner fully deterministic (tests, direct callers);
+  // the automix passes its own rate. `rng` is injectable for the suites.
+  markedRate = 0, recentFlows = [], rng = Math.random,
+} = {}) {
   const reasons = [];
   const fade = (why) => {
     reasons.push(why);
@@ -75,6 +89,21 @@ export function planTransition(live, idle, { style = 'auto', fadeSeconds = 12 } 
   if (style === 'cut' || (style === 'auto' && endsHot)) {
     if (endsHot) reasons.push('track ends hot');
     return planCut(live, idle, reasons);
+  }
+  if (style === 'spinback') return planSpinback(live, idle, reasons);
+
+  // Seam budget: occasionally take an audible exit instead of the invisible
+  // blend, but never repeat the previous seam — a set needs punctuation,
+  // not a tic.
+  if (style === 'auto' && markedRate > 0 && rng() < markedRate) {
+    const pool = MARKED_STYLES.filter((s) => !recentFlows.includes(s));
+    if (pool.length) {
+      const pick = pool[Math.floor(rng() * pool.length) % pool.length];
+      reasons.push(`seam budget: ${pick}`);
+      if (pick === 'spinback') return planSpinback(live, idle, reasons);
+      if (pick === 'cut') return planCut(live, idle, reasons);
+      return planEcho(live, idle, reasons);
+    }
   }
   return planBlend(live, idle, reasons);
 }
@@ -127,6 +156,24 @@ function planCut(live, idle, reasons) {
     reasons,
     startSec: cutSec,
     endSec: cutSec + 2 * (60 / live.effectiveBpm), // 2-beat swap
+    inOffset: idle.cuePoint || is.mixInSec,
+  };
+}
+
+function planSpinback(live, idle, reasons) {
+  const ls = live.structure;
+  const is = idle.structure;
+  const endSec = Math.min(ls.mixOutSec, live.duration - 2);
+  const cutSec = Math.max(live.position + 2 * ls.barLen, phraseFloorSec(ls, endSec));
+  return {
+    style: 'spinback',
+    reasons,
+    startSec: cutSec, // incoming starts AND the outgoing record is thrown back
+    // The spin rings over one bar while the fader crosses; live.position runs
+    // BACKWARDS during it, so the Transition progresses this style on the
+    // audio clock, not on track position.
+    spinDur: ls.barLen,
+    endSec: cutSec + ls.barLen,
     inOffset: idle.cuePoint || is.mixInSec,
   };
 }
@@ -246,14 +293,22 @@ export class Transition {
         this._expected.xf = this.mixer.crossfader;
         if (plan.style === 'blend') idle.setSynced(live); // latch only once audible
         if (plan.style === 'echo') this._beginEchoRamp();
+        if (plan.style === 'spinback') {
+          // Throw the outgoing record backwards the moment the incoming hits.
+          this._spinStartWall = now;
+          this.live.startAutoScratch('backspin');
+        }
       }
       if (plan.style === 'echo' && live.position >= plan.rampSec) this._rampEcho();
       return;
     }
 
     if (this.state === 'OVERLAP') {
-      const from = plan.style === 'blend' ? plan.startSec : plan.startSec;
-      const p = clamp((live.position - from) / Math.max(0.1, plan.endSec - from), 0, 1);
+      // Spinback runs on the audio clock: the outgoing position moves
+      // BACKWARDS while the record spins, so track-position progress lies.
+      const p = plan.style === 'spinback'
+        ? clamp((now - (this._spinStartWall || now)) / Math.max(0.1, plan.spinDur), 0, 1)
+        : clamp((live.position - plan.startSec) / Math.max(0.1, plan.endSec - plan.startSec), 0, 1);
       const ease = plan.style === 'blend' ? smoothstep(p) : p;
       const xfFrom = idle.id === 'A' ? 1 : -1;
       this._setXf(xfFrom + (xfTo - xfFrom) * ease);
@@ -261,7 +316,7 @@ export class Transition {
       if (plan.style === 'blend' && live.position >= plan.swapSec) this._stepBassSwap(dt);
       if (plan.style === 'echo') this._rampEcho();
 
-      const liveDone = !live.playing && live.position >= live.duration - 0.3;
+      const liveDone = plan.style !== 'spinback' && !live.playing && live.position >= live.duration - 0.3;
       if (p >= 1 || liveDone) this._finish(now);
       return;
     }
@@ -324,6 +379,11 @@ export class Transition {
         live.setMacroValue(this._macroBefore ? this._macroBefore.value : 0);
         if (this._macroBefore) live.setMacroType(this._macroBefore.type);
       }, 3000);
+    } else if (plan.style === 'spinback') {
+      // Stop the scripted spin first (the motor hands back toward playback,
+      // inaudible — the fader is already fully across), then park the deck.
+      live.stopAutoScratch();
+      live.pause();
     } else {
       live.pause();
     }
@@ -350,6 +410,9 @@ export class Transition {
 
   cancel() {
     if (this.idle._drop && this.idle._drop.plannedBy === 'automix') this.idle.cancelDrop();
+    if (this.plan.style === 'spinback' && this.live.autoScratch === 'backspin') {
+      this.live.stopAutoScratch();
+    }
     this.idle.setSynced(null);
     this._done(this.mixer.ctx ? this.mixer.ctx.currentTime : 0);
   }
