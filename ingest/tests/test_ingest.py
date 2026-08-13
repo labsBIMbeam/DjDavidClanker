@@ -103,3 +103,50 @@ def test_magnet_handler_claims_urls() -> None:
     assert handlers.find("magnet:?xt=urn:btih:abc") is not None
     assert handlers.find("https://example.org/album.torrent") is not None
     assert handlers.find("https://example.org/page") is None
+
+
+def test_direct_url_handler_claims_audio_urls() -> None:
+    import handlers
+
+    direct = handlers.find("https://archive.org/download/x/track.mp3")
+    assert direct is not None and direct.__name__.endswith("direct_url")
+    assert handlers.find("https://node.audius.co/v1/tracks/abc/stream?app_name=x") is not None
+    assert handlers.find("http://insecure.example/track.mp3") is None
+    assert handlers.find("https://example.org/page.html") is None
+
+
+class FakeHandler:
+    __name__ = "fake"
+
+    @staticmethod
+    def can_handle(url: str) -> bool:
+        return True
+
+    @staticmethod
+    def fetch(url: str, workdir: Path) -> list[Path]:
+        f = workdir / "stream.mp3"
+        f.write_bytes(b"fake-bytes")
+        return [f]
+
+
+def test_deliver_url_renames_single_find_with_metadata() -> None:
+    """The app sends artist/title along; a tagless single download gets the
+    canonical 'Artist - Title' name so the pipeline's fallback tags it."""
+    n = ingest.deliver_url("https://x/stream", "Disco Very", "Found It", FakeHandler)
+    assert n == 1
+    assert [f.name for f in ingest.INBOX.iterdir()] == ["Disco Very - Found It.mp3"]
+
+
+def test_ingest_url_endpoint_accepts_and_schedules(monkeypatch) -> None:
+    from fastapi.testclient import TestClient
+
+    import handlers as handlers_mod
+
+    monkeypatch.setattr(handlers_mod, "find", lambda url: FakeHandler)
+    client = TestClient(ingest.app)
+    r = client.post("/ingest/url", json={"url": "https://x/stream"})
+    assert r.status_code == 200
+    assert r.json()["ok"] is True and r.json()["handler"] == "FakeHandler"
+    monkeypatch.undo()
+    no = client.post("/ingest/url", json={"url": "https://nothing.example/page"})
+    assert no.json()["ok"] is False

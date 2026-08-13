@@ -94,6 +94,10 @@ network access to a host shell.
   seconds, session-scoped)
 - **Your own server**: the Server tab speaks the Subsonic API to a
   self-hosted Navidrome — your collection, full quality, salt+token auth
+- **Discover**: Audius (open API, DJ catalog), Jamendo (Creative Commons —
+  clean for public sets, free client_id) and Archive.org netlabels/live
+  sets. Any find promotes into the crate with ⤴; Archive finds auto-promote
+  the moment they hit a deck — discovery is the road into the collection
 - **The crate pipeline** (`ingest/`): upload, watch folder or URL handlers →
   loudness-normalized (−14 LUFS), tagged, filed into the library Navidrome
   serves. The ⤴ button on a local session track sends it there — drag & drop

@@ -28,6 +28,7 @@ const DEFAULTS = {
   zapDefault: 210, zapMode: 'lnurl', proxy: '', pitchRange: 8,
   outputMaster: '', outputCue: '',
   subsonicUrl: '', subsonicUser: '', subsonicPass: '', ingestUrl: '',
+  jamendoClientId: '',
 };
 
 const caps = capabilities();
@@ -330,6 +331,10 @@ function showSettings() {
     class: 'search-input', value: settings.ingestUrl,
     placeholder: 'http://alflx:8321',
   });
+  const jamendo = h('input', {
+    class: 'search-input', value: settings.jamendoClientId,
+    placeholder: 'Jamendo client_id (free at devportal.jamendo.com)',
+  });
 
   openModal({
     title: '⚙ Settings',
@@ -344,7 +349,8 @@ function showSettings() {
       h('label', { class: 'lbl' }, 'Media server (Navidrome / Subsonic)'), ssUrl, ssUser, ssPass,
       h('div', { class: 'muted' }, 'Your self-hosted library — the Server tab. Auth uses the Subsonic salt+token scheme, the password itself never travels. In the dev shell, allow the host via EXTRA_PROXY_HOSTS.'),
       h('label', { class: 'lbl' }, 'Ingest service'), ingest,
-      h('div', { class: 'muted' }, 'The crate pipeline (upload → loudness → tags → library). Enables the ⤴ button on local session tracks.'),
+      h('div', { class: 'muted' }, 'The crate pipeline (upload → loudness → tags → library). Enables the ⤴ button on local session tracks and discovery finds.'),
+      h('label', { class: 'lbl' }, 'Jamendo client_id'), jamendo,
       h('div', { class: 'caps' }, h('div', { class: 'side-h' }, 'Host domains'),
         ...Object.entries(caps).filter(([k]) => k !== 'shell').map(([k, v]) =>
           h('span', { class: `cap ${v ? 'on' : 'off'}` }, `${v ? '✓' : '×'} ${k}`)),
@@ -362,6 +368,7 @@ function showSettings() {
           settings.subsonicUser = ssUser.value.trim();
           settings.subsonicPass = ssPass.value;
           settings.ingestUrl = ingest.value.trim().replace(/\/+$/, '');
+          settings.jamendoClientId = jamendo.value.trim();
           await store.setJson(SETTINGS_KEY, settings);
           close();
           toast('Saved.', 'ok');

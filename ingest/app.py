@@ -214,27 +214,40 @@ async def ingest(file: UploadFile) -> dict:
     return {"ok": True, "queued": name}
 
 
+def deliver_url(url: str, artist: str, title: str, handler) -> int:
+    """Run a URL handler and move its finds into the inbox. Returns count."""
+    work = WORK / uuid.uuid4().hex
+    work.mkdir(parents=True)
+    try:
+        files = handler.fetch(url, work)
+        for f in files:
+            name = f.name
+            # A single find with metadata from the app gets the canonical
+            # "Artist - Title" name, so the pipeline's filename fallback
+            # tags it correctly even when the download carries no tags.
+            if artist and title and len(files) == 1:
+                name = f"{sanitize(artist)} - {sanitize(title)}{f.suffix}"
+            shutil.move(str(f), INBOX / name)
+        log.info("url handler %s delivered %d file(s)", handler.__name__, len(files))
+        return len(files)
+    except Exception as e:
+        log.warning("url handler failed: %s", e)
+        return 0
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
 @app.post("/ingest/url")
 async def ingest_url(payload: dict) -> dict:
     url = str(payload.get("url", ""))
+    artist = str(payload.get("artist", "")).strip()
+    title = str(payload.get("title", "")).strip()
     handler = handlers.find(url)
     if not handler:
         return {"ok": False, "error": "no handler for this URL"}
-
-    async def run() -> None:
-        work = WORK / uuid.uuid4().hex
-        work.mkdir(parents=True)
-        try:
-            files = await asyncio.to_thread(handler.fetch, url, work)
-            for f in files:
-                shutil.move(str(f), INBOX / f.name)
-            log.info("url handler %s delivered %d file(s)", handler.__name__, len(files))
-        except Exception as e:
-            log.warning("url handler failed: %s", e)
-        finally:
-            shutil.rmtree(work, ignore_errors=True)
-
-    asyncio.get_running_loop().create_task(run())
+    asyncio.get_running_loop().create_task(
+        asyncio.to_thread(deliver_url, url, artist, title, handler)
+    )
     return {"ok": True, "handler": handler.__name__}
 
 

@@ -19,7 +19,14 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..');
 const PORT = Number(process.env.PORT || 5178);
 
-const ALLOW_HOSTS = [/(^|\.)wavlake\.com$/i, /(^|\.)cloudfront\.net$/i, /(^|\.)op3\.dev$/i];
+const ALLOW_HOSTS = [
+  /(^|\.)wavlake\.com$/i, /(^|\.)cloudfront\.net$/i, /(^|\.)op3\.dev$/i,
+  // Discovery sources: Audius (host list + first-party discovery nodes),
+  // Jamendo (API + storage CDN), Archive.org (search/metadata/download —
+  // the download redirect to ia*.us.archive.org happens inside the proxy's
+  // own fetch, so only this first hop needs to be listed).
+  /(^|\.)audius\.co$/i, /(^|\.)jamendo\.com$/i, /(^|\.)archive\.org$/i,
+];
 // User-configured media servers (Navidrome etc.) and test mocks join the
 // allowlist via env: EXTRA_PROXY_HOSTS="music.example.org,127.0.0.1".
 const EXTRA_HOSTS = (process.env.EXTRA_PROXY_HOSTS || '')

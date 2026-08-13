@@ -80,6 +80,16 @@ const server = http.createServer((req, res) => {
   if (url.pathname.startsWith('/rest/stream')) {
     return send(200, 'audio/wav', WAV);
   }
+  if (url.pathname === '/ingest/url' && req.method === 'POST') {
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => {
+      const body = JSON.parse(Buffer.concat(chunks).toString() || '{}');
+      ingested.push({ url: body.url, artist: body.artist, title: body.title });
+      send(200, 'application/json', JSON.stringify({ ok: true, handler: 'mock' }));
+    });
+    return undefined;
+  }
   if (url.pathname === '/ingest' && req.method === 'POST') {
     const chunks = [];
     req.on('data', (c) => chunks.push(c));
