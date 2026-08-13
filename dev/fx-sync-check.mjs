@@ -454,6 +454,32 @@ check('auto-scratch stop hands back to playback', asEnd.pattern === null && asEn
 check('baby scratch stays near its spot', Math.abs(asEnd.pos - asStart.posBefore) < 4,
   `drift ${(asEnd.pos - asStart.posBefore).toFixed(2)}s`);
 
+/* ------------------------------ hot cues ------------------------------ */
+
+const hc = await frame.evaluate(async () => {
+  const A = window.__djclanker.decks.A;
+  A.pause();
+  A.seek(30);
+  A.hotCue(0); // empty pad stores
+  const stored = A.hotCues[0];
+  A.seek(60);
+  A.hotCue(0); // set pad jumps — and fires from stop, CDJ style
+  await new Promise((r) => setTimeout(r, 300)); // let playback + a UI tick land
+  const jumped = Math.abs(A.position - stored) < 1.5;
+  const playing = A.playing;
+  const uiSet = document.querySelector('.deck-top.deck-A .btn-hotcue').classList.contains('set');
+  A.clearHotCue(0);
+  const cleared = A.hotCues[0] === null;
+  A.pause();
+  return { stored, jumped, playing, uiSet, cleared };
+});
+check('hot cue: empty pad stores the position', typeof hc.stored === 'number' && Math.abs(hc.stored - 30) < 0.5,
+  `stored=${hc.stored}`);
+check('hot cue: set pad jumps and fires from stop', hc.jumped && hc.playing,
+  `jumped=${hc.jumped} playing=${hc.playing}`);
+check('hot cue: pad lights while set, clear empties it', hc.uiSet && hc.cleared,
+  `ui=${hc.uiSet} cleared=${hc.cleared}`);
+
 await page.screenshot({ path: `${OUT}-decks.png`, fullPage: true });
 await browser.close();
 

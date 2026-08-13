@@ -60,8 +60,33 @@ const DECISION_SCHEMA = {
     },
     style: {
       type: 'string',
-      enum: ['', 'auto', 'blend', 'cut', 'echo', 'fade'],
-      description: 'Transition style override; empty = leave as is. auto plans per pair (default). Switch only with a musical reason.',
+      enum: ['', 'auto', 'blend', 'cut', 'echo', 'spinback', 'fade'],
+      description: 'Transition style override; empty = leave as is. auto plans per pair with a 25% seam budget (default). spinback = hard rewind exit. Switch only with a musical reason.',
+    },
+    performer: {
+      type: 'string',
+      enum: ['', 'on', 'off'],
+      description: 'The bar-synced performer (moods, scratch bursts, loop rolls, fader rides over the running mix). Turn on for an energetic stretch, off to let the music breathe; empty = leave as is.',
+    },
+    scratch: {
+      anyOf: [
+        {
+          type: 'object',
+          additionalProperties: false,
+          required: ['deck', 'pattern'],
+          properties: {
+            deck: { type: 'string', enum: ['A', 'B'] },
+            pattern: {
+              type: 'string',
+              enum: ['baby', 'drag', 'scribble', 'tear2', 'tear3', 'hydroplane', 'backspin',
+                'forward', 'stab', 'chirp', 'transformer', 'military',
+                'flare1', 'flare2', 'flare3', 'crab', 'orbit', 'reverseOrbit', 'uzi', 'dragTear'],
+            },
+          },
+        },
+        { type: 'null' },
+      ],
+      description: 'Throw one scratch burst (a couple of bars, auto-released) on a deck. Use on the live deck at section peaks, sparingly — one good stab beats four fillers.',
     },
     order: {
       type: 'string',
@@ -99,10 +124,14 @@ Your sources, by role: Wavlake charts/search (bitcoin-native artists, zaps flow 
 catalog (empty query = trending); "archive" = archive.org netlabels — anything you play from
 there is automatically promoted into the crate for next time.
 Each cycle: keep the browser list pointed at good music (automix refills from it), drop one
-short MC line, occasionally ride an effect. The state shows each deck's Camelot key and the
-planned transition — prefer steering toward keys near the live deck's. Leave style=auto and
-order=smart unless you have a musical reason. Talk like a laconic club MC who happens to be a
-robot: warm, dry, no cringe, no hashtags, at most one emoji per ten lines.`;
+short MC line, occasionally ride an effect or throw one scratch burst (a real pattern book:
+flares, tears, crab, stab…) on the live deck at a peak. The PERFORMER is a bar-synced sidekick
+that rides the mix on its own (loop rolls, filter sweeps, blends) — switch it on for an
+energetic stretch, off to let a deep track breathe. The state shows each deck's Camelot key and
+the planned transition — prefer steering toward keys near the live deck's. Leave style=auto and
+order=smart unless you have a musical reason (auto already spends a 25% budget on audible
+seams, spinback included). Talk like a laconic club MC who happens to be a robot: warm, dry,
+no cringe, no hashtags, at most one emoji per ten lines.`;
 
 async function decideLLM(state) {
   const msg = await claude.beta.messages.create({
@@ -149,6 +178,11 @@ function decideHeuristic(state) {
     style: '',
     order: heuristicTick === 1 ? 'smart' : '',
     fx: heuristicTick % 4 === 0 ? { deck: state.liveDeck || 'A', effect: 'macro:echo' } : null,
+    // The heuristic exercises the same performance surface as the model.
+    performer: heuristicTick === 3 ? 'on' : '',
+    scratch: heuristicTick % 8 === 6
+      ? { deck: state.liveDeck || 'A', pattern: heuristicTick % 16 === 6 ? 'flare2' : 'stab' }
+      : null,
   };
 }
 
@@ -168,11 +202,15 @@ async function gatherState(frame) {
       remainingSec: d.duration ? Math.round(d.duration - d.position) : null,
     });
     const status = automix.describe();
+    const performer = window.__djclanker.performer;
     return {
       deckA: deck(decks.A),
       deckB: deck(decks.B),
       liveDeck: automix.liveId || null,
       automixOn: automix.enabled,
+      performer: performer
+        ? { on: performer.enabled, mood: performer.mood, lastAction: performer.lastAction || null }
+        : null,
       transition: { style: automix.transitionStyle, order: automix.order, plan: status.detail || status.label },
       lastTransition: automix.lastTransition ? automix.lastTransition.style : null,
       queueLength: automix.queue.length,
@@ -257,6 +295,29 @@ async function applyDecision(page, frame, decision) {
       frame.evaluate(([id, fx]) => window.__djclanker.decks[id].toggleFx(fx, false), [deck, effect]).catch(() => {});
     }, 9000);
     console.log(`[fx] ${effect} on deck ${deck} for a few bars`);
+  }
+
+  if (decision.performer === 'on' || decision.performer === 'off') {
+    await frame.evaluate((want) => {
+      const p = window.__djclanker.performer;
+      if (want === 'on' && !p.enabled) p.start();
+      if (want === 'off' && p.enabled) p.stop();
+    }, decision.performer);
+    console.log(`[performer] ${decision.performer}`);
+  }
+
+  if (decision.scratch && decision.scratch.deck) {
+    const { deck, pattern } = decision.scratch;
+    const ok = await frame.evaluate(
+      ([id, pat]) => window.__djclanker.decks[id].startAutoScratch(pat),
+      [deck, pattern],
+    );
+    if (ok) {
+      setTimeout(() => {
+        frame.evaluate((id) => window.__djclanker.decks[id].stopAutoScratch(), deck).catch(() => {});
+      }, 4500);
+      console.log(`[scratch] ${pattern} on deck ${deck}`);
+    }
   }
 }
 

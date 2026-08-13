@@ -98,7 +98,7 @@ network access to a host shell.
 - Switching it on mid-set adopts the running deck instead of starting over
 
 **Turntablism**
-- **18 scratch moves in three families** (ported from Zazawowow's PR #8):
+- **20 scratch moves in three families** (ported from Zazawowow's PR #8):
   Foundation (baby, drag, scribble, 2/3-click tears, hydroplane, backspin),
   Cuts (forward, stab, chirp) and Clicks (transformer, military, 1/2/3-click
   flares, crab with finger jitter, orbit both ways, uzi, drag tear). A
