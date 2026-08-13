@@ -201,6 +201,28 @@ input[type=range].fader-v.master { height: auto; align-self: stretch; }
 }
 .xf-row .crossfader { flex: 2; }
 .xf-row .cuevol { flex: 1; max-width: 160px; }
+/* Filter readout under the wave: bipolar bar, fills from the centre. */
+.flt-scope { display: flex; align-items: center; gap: 6px; flex: none; }
+.flt-side { font-size: 9px; color: var(--muted); letter-spacing: .08em; }
+.flt-track {
+  position: relative; width: 120px; height: 14px;
+  background: #0b0e13; border: 1px solid var(--line); border-radius: 3px;
+}
+.flt-track::before {
+  content: ''; position: absolute; left: 50%; top: 2px; bottom: 2px;
+  width: 1px; background: #566072;
+}
+.flt-fill {
+  position: absolute; top: 2px; bottom: 2px; left: 50%; width: 0;
+  background: var(--fire, #f7931a); border-radius: 2px;
+}
+.flt-scope.hot .flt-fill { box-shadow: 0 0 8px rgba(247, 147, 26, 0.6); }
+.flt-text {
+  font-family: var(--mono); font-size: 11px; min-width: 76px;
+  color: var(--muted);
+}
+.flt-scope.hot .flt-text { color: #f3c244; }
+
 .line-box { display: flex; gap: 4px; align-items: center; }
 .line-box .linevol { width: 90px; }
 .btn-line.bad { color: var(--bad); border-color: var(--bad); }

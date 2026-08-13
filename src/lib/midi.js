@@ -2,15 +2,18 @@
  * MIDI controller support — mapped for the Akai MPD218 factory defaults
  * (pads bank A = notes 36–51 on any channel, knobs bank A = CC 3/9/12/13/14/15).
  *
- * The demo layout, pads bottom-left = PAD 1:
+ * The demo layout, pads bottom-left = PAD 1 — both decks strictly mirrored
+ * (outer = deck edge, inner = the shared middle), no automix pads:
  *
- *   13 A·SCRATCH  14 A·BACKSPIN  15 AUTOMIX     16 NEXT ⏭
+ *   13 A·SCRATCH  14 A·BACKSPIN  15 B·BACKSPIN  16 B·SCRATCH
  *    9 A·LOOP 4   10 A·FX hold   11 B·FX hold   12 B·LOOP 4
  *    5 A·SYNC      6 A·DROP       7 B·DROP       8 B·SYNC
  *    1 A·PLAY      2 A·CUE        3 B·CUE        4 B·PLAY
  *
- *   Knobs (left pair = mix, middle = deck A, right = deck B):
- *   K1 crossfader · K2 master · K3 A macro · K4 A filter · K5 B macro · K6 B filter
+ *   Knobs — K1+K3 belong to deck A, K2+K4 to deck B, K5 is the crossfader
+ *   and K6 the headphone level. The master stays in the browser on purpose:
+ *   K1 A filter · K3 A macro · K5 crossfader
+ *   K2 B filter · K4 B macro · K6 cue volume
  *
  * FX pads are MOMENTARY (hold to ride, release to drop out) — they punch the
  * deck's first FX slot, macros included. Everything else toggles on hit.
@@ -23,9 +26,9 @@ export const MPD218_MAP = {
     36: 'a.play', 37: 'a.cue', 38: 'b.cue', 39: 'b.play',
     40: 'a.sync', 41: 'a.drop', 42: 'b.drop', 43: 'b.sync',
     44: 'a.loop4', 45: 'a.fx', 46: 'b.fx', 47: 'b.loop4',
-    48: 'a.scratch', 49: 'a.backspin', 50: 'automix', 51: 'next',
+    48: 'a.scratch', 49: 'a.backspin', 50: 'b.backspin', 51: 'b.scratch',
   },
-  knobs: { 3: 'xf', 9: 'master', 12: 'a.macro', 13: 'a.filter', 14: 'b.macro', 15: 'b.filter' },
+  knobs: { 3: 'a.filter', 9: 'b.filter', 12: 'a.macro', 13: 'b.macro', 14: 'xf', 15: 'cue' },
 };
 
 export function createMidi({ mixer, automix, onCrossfade, onStatus }) {
@@ -49,8 +52,8 @@ export function createMidi({ mixer, automix, onCrossfade, onStatus }) {
     'b.fx': (down) => decks.B.toggleFx(decks.B.fxSlots[0], down),
     'a.scratch': () => decks.A.toggleAutoScratch('baby'),
     'a.backspin': () => decks.A.toggleAutoScratch('backspin'),
-    automix: () => automix.toggle(),
-    next: () => automix.skip(),
+    'b.scratch': () => decks.B.toggleAutoScratch('baby'),
+    'b.backspin': () => decks.B.toggleAutoScratch('backspin'),
   };
 
   const bipolar = (v) => v * 2 - 1;
@@ -59,7 +62,7 @@ export function createMidi({ mixer, automix, onCrossfade, onStatus }) {
       mixer.setCrossfader(bipolar(v));
       if (onCrossfade) onCrossfade(mixer.crossfader);
     },
-    master: (v) => mixer.setMaster(v),
+    cue: (v) => mixer.setCueVolume(v),
     'a.macro': (v) => decks.A.setMacroValue(bipolar(v)),
     'b.macro': (v) => decks.B.setMacroValue(bipolar(v)),
     'a.filter': (v) => decks.A.setFilter(bipolar(v)),

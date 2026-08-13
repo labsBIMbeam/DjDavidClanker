@@ -98,7 +98,40 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
   // Classic channel meter under the wave — level with red overshoot,
   // replacing the old oscilloscope view.
   const meter = LevelMeter(() => deck.level(), { orient: 'h', length: 560, thickness: 14 });
-  const meterRow = h('div', { class: 'deck-meter' }, h('span', { class: 'lbl-sub' }, 'LEVEL'), meter.canvas);
+
+  // Filter readout, readable from across the room: a bipolar bar that fills
+  // from the centre (left = lowpass, right = highpass) plus the live corner
+  // frequency. Big enough to glance at while a knob is doing the driving.
+  const fltFill = h('div', { class: 'flt-fill' });
+  const fltText = h('span', { class: 'flt-text' }, '—');
+  const fltScope = h('div', { class: 'flt-scope', title: 'Channel filter position' },
+    h('span', { class: 'flt-side' }, 'LP'),
+    h('div', { class: 'flt-track' }, fltFill),
+    h('span', { class: 'flt-side' }, 'HP'),
+    fltText,
+  );
+  const fmtHz = (hz) => (hz >= 1000 ? `${(hz / 1000).toFixed(1)} kHz` : `${Math.round(hz)} Hz`);
+
+  function tickFilter() {
+    const v = deck.filter;
+    const x = Math.abs(v);
+    if (x <= 0.02) {
+      fltFill.style.width = '0%';
+      if (fltText.textContent !== '—') fltText.textContent = '—';
+      fltScope.classList.remove('hot');
+      return;
+    }
+    fltFill.style.width = `${Math.round(x * 50)}%`;
+    fltFill.style.left = v < 0 ? `${50 - x * 50}%` : '50%';
+    fltScope.classList.add('hot');
+    // Same corner-frequency mapping as the engine's ChannelFilter.
+    const freq = v < 0 ? 22050 * Math.pow(180 / 22050, x) : 20 * Math.pow(8000 / 20, x);
+    const label = `${v < 0 ? 'LP' : 'HP'} ${fmtHz(freq)}`;
+    if (fltText.textContent !== label) fltText.textContent = label;
+  }
+
+  const meterRow = h('div', { class: 'deck-meter' },
+    h('span', { class: 'lbl-sub' }, 'LEVEL'), meter.canvas, fltScope);
 
   const btnPlay = h('button', { class: 'btn btn-play', title: 'Play / pause (space)' }, '▶');
   const btnCue = h('button', { class: 'btn btn-cue', title: 'Set cue / jump to cue' }, 'CUE');
@@ -791,6 +824,7 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
     // hand-scratch all read correctly instead of a fixed CSS spin.
     record.draw();
     meter.draw();
+    tickFilter();
     platter.classList.toggle('reverse', rate < -0.05);
     platter.classList.toggle('scratching', deck.scratching || deck.rewinding);
     platter.classList.toggle('spinning', Math.abs(rate) > 0.05);

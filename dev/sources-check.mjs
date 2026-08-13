@@ -276,21 +276,28 @@ try {
     dj.midi.handle([0x90, 36, 100]); // pad 1: deck A play toggle
     const played = dj.decks.A.playing !== before.playing;
     dj.midi.handle([0x90, 36, 100]); // toggle back
-    dj.midi.handle([0xb0, 3, 127]); // K1 full right → crossfader +1
+    dj.midi.handle([0xb0, 14, 127]); // K5 full right → crossfader +1
     const xfRight = dj.mixer.crossfader;
-    dj.midi.handle([0xb0, 3, 64]); // detent-ish middle
-    dj.midi.handle([0xb0, 9, 127]); // K2 → master 1
-    const master = dj.mixer.master;
+    dj.midi.handle([0xb0, 14, 64]); // detent-ish middle
+    dj.midi.handle([0xb0, 15, 127]); // K6 → cue volume 1
+    const cue = dj.mixer.cueVolume;
+    dj.midi.handle([0xb0, 3, 0]); // K1 hard left → deck A lowpass
+    const filt = dj.decks.A.filter;
+    const fltUi = document.querySelector('.deck-top.deck-A .flt-text');
+    await new Promise((r) => setTimeout(r, 120)); // one UI tick for the readout
+    const fltLabel = fltUi ? fltUi.textContent : '';
+    dj.midi.handle([0xb0, 3, 64]); // filter back to neutral-ish
     dj.midi.handle([0x90, 45, 100]); // pad 10 down: A FX slot 1 punch in
     const fxDown = dj.decks.A.fx[dj.decks.A.fxSlots[0]].on;
     dj.midi.handle([0x80, 45, 0]); // pad 10 up: punch out
     const fxUp = dj.decks.A.fx[dj.decks.A.fxSlots[0]].on;
-    dj.midi.handle([0xb0, 9, 108]); // master back to a sane level
-    return { played, xfRight, master, fxDown, fxUp };
+    return { played, xfRight, cue, filt, fltLabel, fxDown, fxUp };
   });
   check('MIDI: pad 1 toggles deck A transport', midi.played === true);
-  check('MIDI: K1/K2 drive crossfader and master', midi.xfRight === 1 && midi.master === 1,
-    `xf=${midi.xfRight} master=${midi.master}`);
+  check('MIDI: K5/K6 drive crossfader and cue volume', midi.xfRight === 1 && midi.cue === 1,
+    `xf=${midi.xfRight} cue=${midi.cue}`);
+  check('MIDI: K1 drives the filter and the readout shows it',
+    midi.filt === -1 && midi.fltLabel.startsWith('LP'), `${midi.filt} · "${midi.fltLabel}"`);
   check('MIDI: FX pad is momentary (hold to ride)', midi.fxDown === true && midi.fxUp === false);
 
   await page.screenshot({ path: `${OUT}-server.png`, fullPage: true });
