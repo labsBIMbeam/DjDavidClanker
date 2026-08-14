@@ -1,6 +1,6 @@
 # Handoff — DJ David Clanker
 
-As of: August 14, 2026 · Status: **working, 224 E2E checks across 9 suites + 9 pytest green**
+As of: August 14, 2026 · Status: **working, 226 E2E checks across 9 suites + 9 pytest green**
 
 This document is for the person who touches the project next — whether that's
 you in three months or someone else. It describes what is built, **why it is
@@ -185,14 +185,14 @@ two cases apart.
 ## 4. What is verified
 
 `node dev/smoke.mjs` drives the real app in the real sandboxed iframe against
-the real Wavlake API. No mocks except the Nostr fixture. Last run: **40/40**,
-plus the sibling suites `fx-sync-check` (48), `automix-check` (5),
-`macro-check` (24), `autodj-check` (37), `sources-check` (11, self-contained:
+the real Wavlake API. No mocks except the Nostr fixture. Last run: **43/43**,
+plus the sibling suites `fx-sync-check` (54), `automix-check` (7),
+`macro-check` (24), `autodj-check` (54), `sources-check` (21, self-contained:
 it spawns its own mock Subsonic+ingest server and its own shell on :5177;
 the Audius and Archive.org checks run against the REAL APIs, same policy as
-the Wavlake suites), `playlist-check` (9) and `local-check` (7) — 181 JS
-checks, plus `uv run pytest` in `ingest/` (9, including a real ffmpeg
-loudnorm run).
+the Wavlake suites), `playlist-check` (14), `local-check` (9) and the
+`zaza-check` visual probe — 226 JS checks, plus `uv run pytest` in
+`ingest/` (9, including a real ffmpeg loudnorm run).
 
 **Media pipeline** (gates 1–3): the **Server tab** speaks the Subsonic API
 to a self-hosted Navidrome — the single source of truth for play-ready
@@ -607,6 +607,7 @@ Interactions with non-obvious behavior:
 | CUE | stopped: set the point. Playing: jump back and pause |
 | REW | hold. Target speed grows with hold time up to −14× |
 | SYNC | **latch**: engaging matches BPM (incl. half/double and 2:3 levels) onto the tempo master (MST — or the opposite deck when none is set) and then holds the phase permanently by **bending the rate only** (staged 0.8/2/4 % toward the nearest beat; half a beat rides in over ~6 s). It NEVER seeks — seeking is audible as a beat jump, and the old hard realigns were also masking a grid bug (phase must be computed on the track grid, 60/BASE bpm, not 60/effective). A second click releases |
+| KEY (keylock, pitch box) | tempo keeps driving playbackRate (vinyl), the `clanker-keylock` worklet (`src/audio/keylock.js`, inline source via Blob URL — single-file safe) corrects pitch by 1/currentRate every tickAudio, sync-latch bend included. Dual-tap granular shifter, ~93 ms grain, cos² crossfade; ratio 1 short-circuits to a copy. Source path only — platter/scratch stays vinyl. `mixer.keylockReady` gates the button where worklets are unavailable |
 | MST (tempo master) | marks this deck as the manual tempo master: SYNC always pulls the OTHER deck onto it and refuses on the master itself — syncing the live deck onto the silent one by habit becomes impossible. Lane badge + lit button show who leads; toggle off to return to opposite-deck syncing. The automix ignores it (its transitions sync incoming onto outgoing by construction) |
 | LOOP bar | IN/OUT for manual loops, 1/2/4/8 snap onto the beat grid, EXIT leaves. An active loop holds off the Automix transition |
 | 📁 LOCAL / drag & drop | local audio files into the list or straight onto a deck — always FULL mode, no zap target, not in the persistent playlist |

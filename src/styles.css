@@ -504,6 +504,8 @@ html, body {
   white-space: nowrap;
 }
 
+.btn-key.on { color: #ffa733; border-color: #ffa733; box-shadow: 0 0 6px rgba(255, 167, 51, 0.4); }
+
 /* Tempo master: the MST button in the cluster plus the lane badge. */
 .btn-master.on { color: #ff6a00; border-color: #ff6a00; box-shadow: 0 0 8px rgba(255, 106, 0, 0.4); }
 .lane-mst {

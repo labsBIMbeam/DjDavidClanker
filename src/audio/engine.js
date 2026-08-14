@@ -28,6 +28,7 @@ import { detectBpm, waveformPeaks, rms, analyzeStructure, detectKey, keyObject }
 import { trackCacheId, getAnalysis, putAnalysis } from '../lib/analysiscache.js';
 import { Turntable, reversedBuffer } from './scratch.js';
 import { AutoScratch } from './autoscratch.js';
+import { loadKeylock, createKeylockNode } from './keylock.js';
 import {
   Flanger, Gater, Phaser, Echo, Reverb, ChannelFilter,
   Chorus, Tremolo, AutoPan, Drive, Crush, PingPong, Telephone, AutoWah, Vowel, Comb,
@@ -120,6 +121,8 @@ export class Deck extends Emitter {
     this.autoScratch = null; // active auto-scratch pattern name
     this.scratchChoice = 'baby'; // the move armed in the UI dropdown (survives loads)
     this._autoscratch = null; // AutoScratch instance, created on first use
+    this.keylock = false; // tempo without pitch — corrected by the worklet
+    this._keylockNode = null;
     this.hotCues = [null, null, null, null]; // also reset per load()
 
     /* vinyl */
@@ -770,7 +773,18 @@ export class Deck extends Emitter {
       // Restarting outside the region would play straight past it.
       if (offset > this.loop.end) offset = this.loop.start;
     }
-    src.connect(g.trim);
+    // The keylock worklet sits between the source and the strip — bypassed
+    // (ratio 1 = plain copy) whenever keylock is off. The platter/scratch
+    // path never runs through it: scratching is vinyl on purpose.
+    if (this.mixer.keylockReady) {
+      if (!this._keylockNode) this._keylockNode = createKeylockNode(ctx);
+      // Re-tie to trim each start: cheap, and safe should the graph rebuild.
+      this._keylockNode.disconnect();
+      this._keylockNode.connect(g.trim);
+      src.connect(this._keylockNode);
+    } else {
+      src.connect(g.trim);
+    }
     src.onended = () => {
       if (this._src === src && this._mode === 'source' && this.position >= this.duration - 0.05) {
         this.playing = false;
@@ -900,6 +914,15 @@ export class Deck extends Emitter {
    */
   tickAudio(dt) {
     const step = clamp(dt, 0, 0.1);
+
+    // Keylock: correct the pitch by the inverse of whatever rate the deck is
+    // actually running (tempo fader AND the sync latch's bend), every tick.
+    if (this._keylockNode) {
+      const rate = this._mode === 'source' ? Math.abs(this.currentRate) : 0;
+      const want = this.keylock && rate > 0.5 && rate < 2 ? 1 / rate : 1;
+      const p = this._keylockNode.parameters.get('ratio');
+      if (Math.abs(p.value - want) > 0.0005) p.value = want;
+    }
 
     // Auto-scratch runs on its own 5 ms audio-clock timer (see autoscratch.js)
     // — the fader gates are AudioParam schedules and must not depend on rAF.
@@ -1110,6 +1133,12 @@ export class Deck extends Emitter {
   /** True while the scripted hand (not a human) is on the platter. */
   get autoScratching() {
     return Boolean(this._autoscratch && this._autoscratch.running);
+  }
+
+  /** Keylock: tempo keeps moving through playbackRate, pitch stays put. */
+  setKeylock(on) {
+    this.keylock = Boolean(on) && this.mixer.keylockReady;
+    this.emit('mix');
   }
 
   /** Latch or release SYNC. While latched, tickAudio keeps the phase locked. */
@@ -1424,6 +1453,9 @@ export class Mixer extends Emitter {
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return null;
     this.ctx = new Ctx({ latencyHint: 'interactive' });
+    // Keylock worklet loads async; decks route through it once ready.
+    this.keylockReady = false;
+    loadKeylock(this.ctx).then((ok) => { this.keylockReady = ok; });
     this.masterGain = this.ctx.createGain();
     this.masterGain.gain.value = this.master;
     this.masterAnalyser = this.ctx.createAnalyser();

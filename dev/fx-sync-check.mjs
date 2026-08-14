@@ -466,6 +466,31 @@ check('auto-scratch stop hands back to playback', asEnd.pattern === null && asEn
 check('baby scratch stays near its spot', Math.abs(asEnd.pos - asStart.posBefore) < 4,
   `drift ${(asEnd.pos - asStart.posBefore).toFixed(2)}s`);
 
+// Keylock: the worklet must correct pitch by the inverse of the actual rate.
+const key = await frame.evaluate(async () => {
+  const dj = window.__djclanker;
+  const A = dj.decks.A;
+  for (let i = 0; i < 20 && !dj.mixer.keylockReady; i++) await new Promise((r) => setTimeout(r, 250));
+  if (!dj.mixer.keylockReady) return { ready: false };
+  if (!A.playing) A.toggle();
+  A.setKeylock(true);
+  A.setTempo(8);
+  await new Promise((r) => setTimeout(r, 600));
+  const ratioOn = A._keylockNode.parameters.get('ratio').value;
+  const expected = 1 / A.currentRate;
+  A.setKeylock(false);
+  await new Promise((r) => setTimeout(r, 400));
+  const ratioOff = A._keylockNode.parameters.get('ratio').value;
+  A.setTempo(0);
+  A.pause();
+  return { ready: true, ratioOn, expected, ratioOff };
+});
+check('keylock corrects pitch by the inverse playback rate',
+  key.ready && Math.abs(key.ratioOn - key.expected) < 0.002,
+  key.ready ? `${key.ratioOn.toFixed(4)} vs ${key.expected.toFixed(4)}` : 'worklet unavailable');
+check('keylock off returns the worklet to plain copy',
+  key.ready && Math.abs(key.ratioOff - 1) < 0.002, key.ready ? `${key.ratioOff}` : 'n/a');
+
 /* ------------------------------ hot cues ------------------------------ */
 
 const hc = await frame.evaluate(async () => {

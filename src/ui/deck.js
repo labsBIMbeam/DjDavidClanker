@@ -262,6 +262,11 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
     class: 'btn btn-mini', title: 'Reset tempo to 0',
     onclick: () => { deck.setTempo(0); tempoFader.value = '0'; },
   }, '0');
+  const btnKeylock = h('button', {
+    class: 'btn btn-mini btn-key',
+    title: 'Keylock: the tempo fader stops bending the pitch (granular worklet). Scratching stays vinyl',
+    onclick: () => deck.setKeylock(!deck.keylock),
+  }, 'KEY');
 
   const eqRow = (band, label) => {
     const f = fader({
@@ -725,6 +730,7 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
         tempoFader,
         tempoVal,
         h('div', { class: 'pitch-btns' }, btnTempoRange, btnTempoReset),
+        btnKeylock,
       ),
     ),
     h('div', { class: 'cluster-right deck-tempo' },
@@ -1128,6 +1134,8 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
     const isMaster = deck.mixer.syncMaster === deck.id;
     btnMaster.classList.toggle('on', isMaster);
     laneMst.classList.toggle('show', isMaster);
+    btnKeylock.classList.toggle('on', deck.keylock);
+    btnKeylock.disabled = !deck.mixer.keylockReady;
     const lvl = deck.level();
     platter.style.boxShadow = deck.playing
       ? `0 0 ${Math.round(20 + lvl * 26)}px rgba(255, 106, 0, 0.32)` : '';

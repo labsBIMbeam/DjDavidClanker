@@ -55,8 +55,10 @@ network access to a host shell.
 - **Beat loops**: IN/OUT for manual loops, 1/2/4/8 snap onto the detected
   grid, EXIT leaves
 - **Tempo fader** ±8 / ±16 / ±50 %, BPM detection with beat phase and 4/4
-  downbeat, **SYNC** as a latch: pulls BPM *and* beat phase onto the other
-  deck (incl. half/double tempo) and keeps the phase locked until released
+  downbeat, **SYNC** as a latch: pulls BPM *and* beat phase onto the tempo
+  master (incl. half/double tempo) and keeps the phase locked by bending
+  the rate — never by seeking. **KEY** (keylock) stops the tempo fader from
+  bending the pitch: a granular worklet corrects it back live
 - **Quantized DROP**: starts the deck sample-accurately on the other deck's
   next bar-1
 - 3-band EQ with kill, bipolar filter sweep (LP ↔ HP), trim with auto-gain
@@ -360,7 +362,10 @@ For architecture, design decisions, test coverage and open items, see
 
 ## Known limits
 
-- **No keylock.** Changing the tempo shifts the pitch.
+- **Keylock is granular, not spectral.** The KEY button (per deck) corrects
+  pitch via a dual-tap granular worklet — clean for the sync range (±8/16 %),
+  audibly grainy toward the extremes. Scratching bypasses it on purpose:
+  a scratch without vinyl pitch is not a scratch.
 - **Scratch latency** sits around 45 ms — the grain queue has to be filled
   that far ahead so nothing drops out. Enough for baby scratches and
   transformer work; not for competition-level turntablism.
