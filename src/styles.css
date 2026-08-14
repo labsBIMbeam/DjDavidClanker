@@ -404,7 +404,7 @@ html, body {
 }
 .vis-canvas.show { display: block; }
 .app { position: relative; z-index: 1; }
-.btn-stage.on { color: #ff6a00; border-color: #ff6a00; }
+.btn-stage.on, .btn-pop.on { color: #ff6a00; border-color: #ff6a00; }
 .stage-view .browser { display: none; }
 .stage-view .app { max-width: none; padding: 10px 24px 24px; }
 .stage-view .lane-center .wave { height: 110px; }

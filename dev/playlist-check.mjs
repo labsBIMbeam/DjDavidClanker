@@ -99,8 +99,10 @@ const set = await frame.evaluate(async () => {
   const dj = window.__djclanker;
   const A = dj.decks.A;
   const id = A.track.id;
-  A.seek(2); A.cue(); // cue point at 2 s (deck is paused after load)
+  // Hot cue FIRST, main cue LAST — storing a hot cue also arms the main cue
+  // (booth-round semantics), so the order decides which cue survives.
   A.seek(4); A.hotCue(1);
+  A.seek(2); A.cue(); // cue point at 2 s (deck is paused after load)
   // Find the loaded track's row by its DECK A marker — indexes shifted
   // after the removal check above, and the marker pass runs at 2 Hz, so
   // poll briefly for it after the fresh render.
@@ -138,8 +140,10 @@ const restored = await frame.evaluate(() => {
   const A = window.__djclanker.decks.A;
   return { cue: A.cuePoint, hot: A.hotCues };
 });
+// The hot cue stored at 6 s after starring ALSO re-armed the main cue — the
+// restored record must carry cue=6, not the older 2 s mark.
 check('setlist: loading a listed track restores its marks',
-  restored.cue === 2 && restored.hot[1] === 4 && restored.hot[2] === 6,
+  restored.cue === 6 && restored.hot[1] === 4 && restored.hot[2] === 6,
   JSON.stringify(restored));
 
 // The setlist view: badge, running-order controls, sources hidden below.

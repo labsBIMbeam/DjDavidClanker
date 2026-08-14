@@ -30,14 +30,14 @@ import { Turntable, reversedBuffer } from './scratch.js';
 import { AutoScratch } from './autoscratch.js';
 import { loadKeylock, createKeylockNode } from './keylock.js';
 import {
-  Flanger, Gater, Phaser, Echo, Reverb, ChannelFilter,
+  Flanger, Gater, Phaser, Barber, Echo, Reverb, ChannelFilter,
   Chorus, Tremolo, AutoPan, Drive, Crush, PingPong, Telephone, AutoWah, Vowel, Comb,
 } from './fx.js';
 import { MacroFX, MACRO_TYPES } from './macrofx.js';
 
 /** Insert order in the chain — modulation first, gate, then time-based tails. */
 export const FX_TYPES = [
-  'flanger', 'phaser', 'chorus', 'gater', 'tremolo', 'autopan',
+  'flanger', 'phaser', 'barber', 'chorus', 'gater', 'tremolo', 'autopan',
   'drive', 'crush', 'echo', 'pingpong', 'reverb',
   'telephone', 'autowah', 'vowel', 'comb',
 ];
@@ -47,7 +47,7 @@ export const FX_TYPES = [
  * sits in FX slot 1. Everything else stays at its panel value.
  */
 export const FX_PRIMARY = {
-  flanger: 'mix', phaser: 'mix', chorus: 'mix', gater: 'depth',
+  flanger: 'mix', phaser: 'mix', barber: 'mix', chorus: 'mix', gater: 'depth',
   tremolo: 'depth', autopan: 'width', drive: 'drive', crush: 'mix',
   echo: 'mix', pingpong: 'mix', reverb: 'mix', telephone: 'width',
   autowah: 'mix', vowel: 'vowel', comb: 'mix',
@@ -94,6 +94,7 @@ export class Deck extends Emitter {
     this.playing = false; // transport intent, not "is sound coming out"
     this.duration = 0;
     this.cuePoint = 0;
+    this._cueManual = false; // set by hand/hot cue — analysis must not move it
 
     this.tempo = 0; // percent
     this.tempoRange = 8;
@@ -137,6 +138,7 @@ export class Deck extends Emitter {
     this.fx = {
       flanger: { on: false, rate: 0.35, depth: 0.0022, feedback: 0.55, mix: 0.6 },
       phaser: { on: false, rate: 0.4, depth: 0.7, feedback: 0.35, mix: 0.7 },
+      barber: { on: false, rate: 0.14, depth: 0.85, mix: 0.8 },
       gater: { on: false, division: 0.5, duty: 0.5, depth: 1, smooth: 0.25 },
       echo: { on: false, division: 0.5, feedback: 0.45, mix: 0.5 },
       reverb: { on: false, decay: 1.6, tone: 5000, mix: 0.35 },
@@ -152,7 +154,9 @@ export class Deck extends Emitter {
       comb: { on: false, freq: 220, feedback: 0.8, mix: 0.5 },
     };
     /** Which two units the deck's FX buttons drive. The chain holds all five. */
-    this.fxSlots = ['flanger', 'gater'];
+    // Barber rides slot 1 on BOTH decks from boot: the MIDI rotary (K3/K4 =
+    // slot-1 amount) pulls up the endless riser before anyone opens the rack.
+    this.fxSlots = ['barber', 'gater'];
     /** Channel-filter personality: 'clean' | 'djm' | 'xone'. */
     this.filterModel = 'clean';
     /** One-knob macro FX (Traktor Mixer FX-style): type + bipolar value. */
@@ -198,6 +202,7 @@ export class Deck extends Emitter {
 
     const flanger = new Flanger(ctx);
     const phaser = new Phaser(ctx);
+    const barber = new Barber(ctx);
     const gater = new Gater(ctx);
     const echo = new Echo(ctx);
     const reverb = new Reverb(ctx);
@@ -230,7 +235,8 @@ export class Deck extends Emitter {
     vowel.output.connect(comb.input);
     comb.output.connect(flanger.input);
     flanger.output.connect(phaser.input);
-    phaser.output.connect(chorus.input);
+    phaser.output.connect(barber.input);
+    barber.output.connect(chorus.input);
     chorus.output.connect(gater.input);
     gater.output.connect(tremolo.input);
     tremolo.output.connect(autopan.input);
@@ -258,7 +264,7 @@ export class Deck extends Emitter {
     macro.setValue(this.macro.value);
 
     this._graph = {
-      trim, low, mid, high, filter, flanger, phaser, gater, echo, reverb,
+      trim, low, mid, high, filter, flanger, phaser, barber, gater, echo, reverb,
       chorus, tremolo, autopan, drive, crush, pingpong, telephone, autowah, vowel, comb,
       macro, gain, scratchGate, analyser, cueSend,
     };
@@ -301,6 +307,7 @@ export class Deck extends Emitter {
     this.autoScratch = null;
     this.loop = { active: false, start: 0, end: 0, beats: 0 };
     this.cuePoint = 0;
+    this._cueManual = false;
     this.hotCues = [null, null, null, null];
     this._pausedAt = 0;
     this._mode = 'idle';
@@ -454,6 +461,16 @@ export class Deck extends Emitter {
         this.beatTimes = res.beatTimes && res.beatTimes.length ? res.beatTimes : null;
         this.driftPct = res.driftPct || 0;
         this.emit('bpm');
+      }
+
+      // Default cue = the first downbeat. Until a hand or a hot cue pins the
+      // cue, CUE returns to where the music starts, not to 0:00. No 'cue'
+      // emit: the default is derivable, it must not write into the setlist.
+      if (!this._cueManual) {
+        const anchor = Number.isFinite(this.barOffset) ? this.barOffset : this.beatOffset;
+        if (Number.isFinite(anchor) && anchor > 0.05 && anchor < this.duration) {
+          this.cuePoint = anchor;
+        }
       }
 
       // Reversing a 6-minute stereo buffer costs ~60 MB and ~100 ms, so it is
@@ -652,15 +669,26 @@ export class Deck extends Emitter {
     this.emit('transport');
   }
 
-  /** CDJ-style: sets the point when stopped, jumps back to it when playing. */
+  /**
+   * CDJ-style: sets the point when stopped, jumps back to it when playing.
+   * The point follows the last hot cue stored; before anyone touches it,
+   * analysis parks it on the first downbeat — CUE never means "0:00" on a
+   * track whose music starts later.
+   */
   cue() {
     if (this.playing) {
       this.pause();
       this.seek(this.cuePoint);
     } else {
-      this.cuePoint = this.position;
-      this.emit('cue');
+      this.setCuePoint(this.position);
     }
+  }
+
+  /** Move the main cue. Manual (default) pins it against the analysis default. */
+  setCuePoint(t, { manual = true } = {}) {
+    this.cuePoint = clamp(t, 0, this.duration || t);
+    if (manual) this._cueManual = true;
+    this.emit('cue');
   }
 
   jumpToCue() {
@@ -668,17 +696,21 @@ export class Deck extends Emitter {
   }
 
   /**
-   * Hot cues, CDJ semantics: an empty pad stores the current position, a set
-   * pad jumps there (and fires playback if the deck is stopped — that is
-   * what hot cues are for). Clearing is the UI's double-tap.
+   * Hot cues: an empty pad stores the current position, a set pad jumps
+   * there — and ONLY jumps. The transport state stays whatever it was
+   * (booth request: hitting a cue point must never autostart the deck).
+   * Clearing is the UI's double-tap.
    */
   hotCue(i) {
     if (!(i >= 0 && i < 4) || this.status !== 'ready') return;
     if (this.hotCues[i] == null) {
       this.hotCues[i] = this.position;
+      // Storing a hot cue also arms the main cue — CUE returns to the last
+      // mark you set, not to wherever the transport happened to stop.
+      this.cuePoint = this.position;
+      this._cueManual = true;
     } else {
       this.seek(this.hotCues[i]);
-      if (!this.playing) this.play({ instant: true });
     }
     this.emit('cue');
   }

@@ -1038,3 +1038,109 @@ export class Comb {
     this.fb.gain.setTargetAtTime(this.on ? this.feedback : 0, t, 0.02);
   }
 }
+
+/**
+ * Barberpole phaser — the sweep that never arrives. Two 4-stage allpass
+ * voices share the input; each is driven by its own SAWTOOTH sweep LFO and
+ * faded by a sine window, and the second voice runs half a period behind.
+ * While one voice's sweep resets at the top its window has it silent and
+ * the other voice is mid-climb at full level — the ear hears one endless
+ * riser (the Shepard-tone trick, phaser edition).
+ */
+export class Barber {
+  constructor(ctx) {
+    this.ctx = ctx;
+    this.on = false;
+    this.rate = 0.14; // Hz — one slow, endless climb
+    this.depth = 0.85;
+    this.mix = 0.8;
+
+    this.input = ctx.createGain();
+    this.output = ctx.createGain();
+    this.dry = ctx.createGain();
+    this.wet = ctx.createGain();
+    this.input.connect(this.dry).connect(this.output);
+    this.wet.connect(this.output);
+
+    this.voices = [];
+    const T = 1 / this.rate;
+    for (let v = 0; v < 2; v++) {
+      const stages = [280, 620, 1040, 1520].map((f) => {
+        const ap = ctx.createBiquadFilter();
+        ap.type = 'allpass';
+        ap.frequency.value = f;
+        ap.Q.value = 0.6;
+        return ap;
+      });
+      let node = this.input;
+      for (const ap of stages) {
+        node.connect(ap);
+        node = ap;
+      }
+      const vg = ctx.createGain();
+      vg.gain.value = 0;
+      node.connect(vg).connect(this.wet);
+
+      // Sweep: saw −1..1 → each stage's frequency, scaled by depth.
+      const saw = ctx.createOscillator();
+      saw.type = 'sawtooth';
+      saw.frequency.value = this.rate;
+      const sweep = ctx.createGain();
+      sweep.gain.value = 0;
+      saw.connect(sweep);
+      for (const ap of stages) sweep.connect(ap.frequency);
+
+      // Window: 0.5 + 0.5·sin at the same rate — voice 2 starts T/2 later,
+      // so the pair hands the sweep back and forth seamlessly.
+      const win = ctx.createOscillator();
+      win.type = 'sine';
+      win.frequency.value = this.rate;
+      const winAmp = ctx.createGain();
+      winAmp.gain.value = 0.5;
+      const winOff = ctx.createConstantSource();
+      winOff.offset.value = 0.5;
+      win.connect(winAmp).connect(vg.gain);
+      winOff.connect(vg.gain);
+
+      const t0 = ctx.currentTime + 0.05 + v * (T / 2);
+      saw.start(t0);
+      win.start(t0);
+      winOff.start();
+      this.voices.push({ stages, vg, saw, sweep, win, winAmp, winOff });
+    }
+
+    this.dry.gain.value = 1;
+    this.wet.gain.value = 0;
+    this._apply();
+  }
+
+  setEnabled(on) {
+    this.on = Boolean(on);
+    this._apply();
+  }
+
+  set(params = {}) {
+    if (params.rate !== undefined) this.rate = clamp(params.rate, 0.03, 2);
+    if (params.depth !== undefined) this.depth = clamp(params.depth, 0, 1);
+    if (params.mix !== undefined) this.mix = clamp(params.mix, 0, 1);
+    this._apply();
+  }
+
+  _apply() {
+    const t = this.ctx.currentTime;
+    const wet = this.on ? this.mix : 0;
+    this.wet.gain.setTargetAtTime(wet, t, 0.02);
+    this.dry.gain.setTargetAtTime(1 - wet * 0.5, t, 0.02);
+    for (const v of this.voices) {
+      v.saw.frequency.setTargetAtTime(this.rate, t, 0.05);
+      v.win.frequency.setTargetAtTime(this.rate, t, 0.05);
+      v.sweep.gain.setTargetAtTime(this.on ? this.depth * 900 : 0, t, 0.05);
+    }
+  }
+
+  dispose() {
+    for (const v of this.voices) {
+      try { v.saw.stop(); v.win.stop(); v.winOff.stop(); } catch { /* stopped */ }
+    }
+  }
+}
