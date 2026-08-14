@@ -1,6 +1,8 @@
 import { h, clear, fmtTime, fader } from './dom.js';
+import { MatrixRain } from './rain.js';
 import { setImage } from '../lib/artwork.js';
 import { SEC_PER_REV, FX_TYPES, FILTER_MODELS, MACRO_TYPES, MACRO_LABELS } from '../audio/engine.js';
+import { scratchFamilies } from '../audio/autoscratch.js';
 import { Platter } from './platter.js';
 import { LevelMeter } from './meter.js';
 
@@ -17,34 +19,35 @@ const DIVISIONS = [
  * playhead drawn over it, so the rAF loop stays cheap.
  */
 export function DeckPanel(deck, { onZap, onEject, accent }) {
-  const wave = h('canvas', { class: 'wave', height: 120 });
+  const wave = h('canvas', { class: 'wave', height: 64 });
 
-  /* Zoom: ×1 = whole track (cached overview); beyond that a playhead-centered
-     window rendered live from the fine peak set. */
-  const view = { zoom: 1 };
+  /* Wavedeck: the main canvas is ALWAYS a playhead-centered zoom window
+     (default ×8 of the track, range ×2–×64); the whole track lives on the
+     overview strip below it. */
+  const view = { zoom: 8 };
   const zoomOut = h('button', { class: 'btn btn-mini zoom-out', title: 'Zoom the waveform out' }, '−');
-  const zoomLabel = h('button', { class: 'btn btn-mini zoom-fit', title: 'Reset zoom (whole track)' }, '×1');
+  const zoomLabel = h('button', { class: 'btn btn-mini zoom-fit', title: 'Reset zoom (×8)' }, '×8');
   const zoomIn = h('button', { class: 'btn btn-mini zoom-in', title: 'Zoom the waveform in' }, '+');
   const zoomBox = h('div', { class: 'wave-zoom' }, zoomOut, zoomLabel, zoomIn);
-  const waveWrap = h('div', { class: 'wave-wrap' }, wave, zoomBox, h('div', { class: 'wave-empty' }, 'No track loaded'));
+  const waveWrap = h('div', { class: 'wave-wrap' }, wave, zoomBox);
 
   function setZoom(z) {
-    view.zoom = Math.max(1, Math.min(64, z));
+    view.zoom = Math.max(2, Math.min(64, z));
     const zl = view.zoom;
-    zoomLabel.textContent = zl < 1.05 ? '×1' : zl < 10 ? `×${zl.toFixed(1)}` : `×${Math.round(zl)}`;
+    zoomLabel.textContent = zl < 10 ? `×${zl.toFixed(1).replace(/\.0$/, '')}` : `×${Math.round(zl)}`;
     waveWrap.dataset.zoom = String(Math.round(zl * 100) / 100);
   }
   zoomIn.addEventListener('click', () => setZoom(view.zoom * 1.5));
   zoomOut.addEventListener('click', () => setZoom(view.zoom / 1.5));
-  zoomLabel.addEventListener('click', () => setZoom(1));
+  zoomLabel.addEventListener('click', () => setZoom(8));
   waveWrap.addEventListener('wheel', (e) => {
     if (!deck.peaks) return;
     e.preventDefault();
     setZoom(view.zoom * (e.deltaY < 0 ? 1.3 : 1 / 1.3));
   }, { passive: false });
-  setZoom(1);
+  setZoom(8);
 
-  /** Visible track window: whole track at ×1, else centered on the playhead. */
+  /** Visible track window, centered on the playhead, clamped to the ends. */
   function viewWindow() {
     const dur = deck.duration || 1;
     const span = dur / view.zoom;
@@ -52,6 +55,18 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
     t0 = Math.max(0, Math.min(dur - span, t0));
     return { t0, span };
   }
+
+  // Overview strip: the whole track at a glance under the zoom window.
+  const overview = h('canvas', { class: 'wave-overview', height: 20 });
+  overview.addEventListener('click', (e) => {
+    if (!deck.duration) return;
+    const r = overview.getBoundingClientRect();
+    deck.seek(((e.clientX - r.left) / r.width) * deck.duration);
+  });
+
+  // Empty lane = the canonical 600B matrix rain plus a quiet call to action.
+  const rain = MatrixRain();
+  const laneOverlay = h('div', { class: 'lane-empty-msg' }, 'THE SIGNAL WAITS · LOAD A TRACK');
 
   const art = h('div', { class: 'deck-art' }, h('div', { class: 'deck-art-ph' }, '⏻'));
   const title = h('div', { class: 'deck-title' }, '—');
@@ -76,7 +91,7 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
     h('span', { class: 'loop-sep' }), ...beatLoopBtns, btnLoopExit,
   );
 
-  const record = Platter(deck, { accent, size: 132 });
+  const record = Platter(deck, { accent, size: 170 });
   const platter = record.root;
   const jogHint = h('div', { class: 'jog-hint' }, 'VINYL');
 
@@ -90,10 +105,25 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
   const scratchBtns = SCRATCH_PATTERNS.map(([label, id]) =>
     h('button', {
       class: 'btn btn-mini btn-scratch',
-      title: `Auto-scratch: ${id} (beat-synced, runs a couple of bars)`,
+      title: `Auto-scratch: ${id} (loops until toggled off; tap again to stop)`,
       onclick: () => deck.toggleAutoScratch(id),
     }, label));
-  const scratchRow = h('div', { class: 'scratch-row' }, ...scratchBtns);
+
+  // The full pattern book behind the quick buttons: every move from the
+  // autoscratch library, grouped by family. Picking one starts it (or swaps
+  // it in live); picking the top entry stops.
+  const scratchSel = h('select', { class: 'scratch-sel', title: 'All scratch moves — pick to start, first entry stops' },
+    h('option', { value: '' }, 'SCRATCH…'),
+    ...[...scratchFamilies()].map(([family, list]) =>
+      h('optgroup', { label: family },
+        ...list.map((p) => h('option', { value: p.key, title: p.blurb }, p.label)))),
+  );
+  scratchSel.addEventListener('change', () => {
+    const key = scratchSel.value;
+    if (!key) deck.stopAutoScratch();
+    else if (deck.autoScratch !== key) deck.toggleAutoScratch(key);
+  });
+  const scratchRow = h('div', { class: 'scratch-row' }, ...scratchBtns, scratchSel);
 
   // Classic channel meter under the wave — level with red overshoot,
   // replacing the old oscilloscope view.
@@ -212,7 +242,7 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
       onInput: (v) => deck.setEq(band, v),
     });
     const kill = h('button', {
-      class: 'btn btn-kill', title: `${label} killen`,
+      class: 'btn btn-kill', title: `Kill ${label}`,
       onclick: () => {
         const killed = deck.eq[band] <= -25;
         deck.setEq(band, killed ? 0 : -26);
@@ -220,7 +250,7 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
         kill.classList.toggle('on', !killed);
       },
     }, label);
-    return { wrap: h('div', { class: 'eq-strip' }, f, kill), f };
+    return { wrap: h('div', { class: 'eq-strip' }, f, kill), f, kill, band };
   };
   const eqHigh = eqRow('high', 'HI');
   const eqMid = eqRow('mid', 'MID');
@@ -415,11 +445,49 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
   btnRew.addEventListener('pointercancel', rewUp);
   btnRew.addEventListener('pointerleave', rewUp);
 
-  waveWrap.addEventListener('click', (e) => {
-    if (!deck.duration || e.target.closest('.wave-zoom')) return;
+  /* Wave scrubbing: grab the waveform and slide it under the fixed playhead
+     (drag left = forward, like pulling tape past a head); a plain click still
+     jumps straight to the time under the cursor. */
+  let waveGrab = null;
+  waveWrap.addEventListener('pointerdown', (e) => {
+    if (!deck.duration || (e.button !== undefined && e.button !== 0)) return;
+    if (e.target.closest('.wave-zoom')) return;
+    waveWrap.setPointerCapture(e.pointerId);
+    waveGrab = { id: e.pointerId, x: e.clientX, pos: deck.position, moved: false, last: 0 };
+    e.preventDefault();
+  });
+  waveWrap.addEventListener('pointermove', (e) => {
+    if (!waveGrab || e.pointerId !== waveGrab.id) return;
+    const dx = e.clientX - waveGrab.x;
+    if (!waveGrab.moved && Math.abs(dx) < 4) return;
+    waveGrab.moved = true;
+    waveWrap.classList.add('scrubbing');
+    // Rate-limit the seeks: each one restarts the source node, and the ear
+    // does not need more than ~30 updates a second while scrubbing.
+    const now = performance.now();
+    if (now - waveGrab.last < 30) return;
+    waveGrab.last = now;
     const r = wave.getBoundingClientRect();
-    const { t0, span } = viewWindow();
-    deck.seek(t0 + ((e.clientX - r.left) / r.width) * span);
+    const { span } = viewWindow();
+    deck.seek(Math.max(0, Math.min(deck.duration, waveGrab.pos - (dx / r.width) * span)));
+  });
+  const waveUp = (e) => {
+    if (!waveGrab || e.pointerId !== waveGrab.id) return;
+    const wasDrag = waveGrab.moved;
+    waveGrab = null;
+    waveWrap.classList.remove('scrubbing');
+    if (!wasDrag && deck.duration) {
+      const r = wave.getBoundingClientRect();
+      const { t0, span } = viewWindow();
+      deck.seek(t0 + ((e.clientX - r.left) / r.width) * span);
+    }
+  };
+  waveWrap.addEventListener('pointerup', waveUp);
+  waveWrap.addEventListener('pointercancel', (e) => {
+    if (waveGrab && e.pointerId === waveGrab.id) {
+      waveGrab = null;
+      waveWrap.classList.remove('scrubbing');
+    }
   });
 
   /* ------------------------------ platter ------------------------------ */
@@ -470,51 +538,93 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
   platter.addEventListener('pointerup', platterUp);
   platter.addEventListener('pointercancel', platterUp);
 
-  // The deck is mounted as two fragments so the app can run the crossfader
-  // full-width between top (head/FX/wave/meter) and bottom (jog/tempo).
-  // EQ and channel strip are exposed separately — they live in the middle
-  // mixer column, like on a real 2-channel battle mixer.
-  const top = h('div', { class: `deck deck-top deck-${deck.id}`, dataset: { accent } },
+  // Wavedeck v2: the shared stack shows ONLY the waves — a slim lane per
+  // deck (zoom window over overview strip). Everything else lives in ONE
+  // deck panel below: head, the big platter with the full-track ring,
+  // transport/loops/cues, FX and the channel meter. The panel carries the
+  // legacy `deck-top`/`deck-bottom` classes so every suite selector keeps
+  // resolving.
+  const eqIcon = h('span', { class: 'eq-ico' }, h('i'), h('i'), h('i'));
+  const laneBpm = h('span', { class: 'lane-bpm bpm-live' }, '—');
+  const lane = h('div', { class: `deck deck-lane deck-${deck.id}`, dataset: { accent } },
+    h('div', { class: 'lane-cap' },
+      h('div', { class: 'lane-deck' }, `DECK ${deck.id}`, eqIcon),
+      title,
+      h('div', { class: 'deck-times' }, timeCur, h('span', { class: 'sep' }, '·'), timeRem),
+      h('div', { class: 'lane-actions' }, btnZap, btnEject),
+    ),
+    // Mirrored pair: deck A carries its overview ABOVE the zoom window and
+    // deck B below, so the two big waves meet edge-to-edge in the stack.
+    h('div', { class: 'lane-center' },
+      ...(deck.id === 'A' ? [overview, waveWrap] : [waveWrap, overview])),
+    h('div', { class: 'lane-capr' }, laneBpm, badgeKey),
+    laneOverlay,
+  );
+
+  const top = h('div', {
+    class: `deck deck-main deck-top deck-bottom deck-${deck.id}`, dataset: { accent },
+  },
     h('div', { class: 'deck-head' },
       art,
       h('div', { class: 'deck-meta' },
-        h('div', { class: 'deck-id' }, `DECK ${deck.id}`, badge, badgeKey),
-        title,
+        h('div', { class: 'deck-id' }, `DECK ${deck.id}`, badge),
         artist,
-        h('div', { class: 'deck-times' }, timeCur, h('span', { class: 'sep' }, '/'), timeRem),
       ),
-      h('div', { class: 'deck-head-actions' }, btnZap, btnEject),
     ),
-    fxSection,
-    waveWrap,
-    meterRow,
   );
 
-  const bottom = h('div', { class: `deck deck-bottom deck-${deck.id}`, dataset: { accent } },
-    h('div', { class: 'deck-body' },
-      h('div', { class: 'deck-jog' }, platter, jogHint,
+  // Hot cues, CDJ style: tap sets or jumps, double-tap clears.
+  const hotCueBtns = [0, 1, 2, 3].map((i) => h('button', {
+    class: 'btn btn-hotcue',
+    title: `Hot cue ${i + 1}: tap = set / jump, double-tap = clear`,
+    onclick: () => deck.hotCue(i),
+    ondblclick: (e) => { e.preventDefault(); deck.clearHotCue(i); },
+  }, String(i + 1)));
+  const hotCueRow = h('div', { class: 'hotcue-row' },
+    h('span', { class: 'lbl-sub' }, 'HOT CUES'), ...hotCueBtns);
+
+  // The macro amount as a first-class deck control (LP ← off → HP).
+  const macroAmount = fader({
+    min: -1, max: 1, step: 0.01, value: deck.macro.value, orient: 'h',
+    label: `Macro deck ${deck.id}`, className: 'macro macro-main',
+    onInput: (v) => deck.setMacroValue(v),
+  });
+  const macroRow = h('div', { class: 'macro-main-row' },
+    h('span', { class: 'lbl-sub' }, 'MACRO · LP'), macroAmount, h('span', { class: 'lbl-sub' }, 'HP'));
+
+  // CDJ geometry: the pitch fader rides directly beside the jog wheel, the
+  // FX units stack vertically on the performance side.
+  top.appendChild(h('div', { class: 'deck-cluster deck-body' },
+    h('div', { class: 'cluster-left deck-jog' },
+      h('div', { class: 'jog-main' },
+        platter, jogHint,
         h('div', { class: 'transport' }, btnRew, btnCue, btnPlay),
-        loopRow,
         btnVinyl,
         scratchRow,
       ),
-      h('div', { class: 'deck-tempo' },
-        h('div', { class: 'bpm-box' },
-          h('label', { class: 'lbl' }, 'BPM'),
-          h('div', { class: 'bpm-live-wrap', title: 'Effective BPM — follows the tempo fader' }, bpmLive),
-          h('div', { class: 'bpm-base-row' }, h('span', { class: 'lbl-sub' }, 'BASE'), bpmField, btnTap),
-        ),
-        btnSync,
-        btnDrop,
-        h('div', { class: 'pitch-box' },
-          h('label', { class: 'lbl' }, 'Tempo'),
-          tempoFader,
-          tempoVal,
-          h('div', { class: 'pitch-btns' }, btnTempoRange, btnTempoReset),
-        ),
+      h('div', { class: 'pitch-box' },
+        h('label', { class: 'lbl' }, 'TEMPO'),
+        tempoFader,
+        tempoVal,
+        h('div', { class: 'pitch-btns' }, btnTempoRange, btnTempoReset),
       ),
     ),
-  );
+    h('div', { class: 'cluster-right deck-tempo' },
+      h('div', { class: 'perf-row' },
+        h('div', { class: 'bpm-base-row' }, h('span', { class: 'lbl-sub' }, 'BASE'), bpmField, btnTap),
+        btnSync,
+        btnDrop,
+      ),
+      hotCueRow,
+      loopRow,
+      fxSection,
+      macroRow,
+    ),
+  ));
+  top.appendChild(meterRow);
+
+  // Legacy fragment kept only for the API shape; nothing mounts it anymore.
+  const bottom = h('div', { class: `deck-legacy deck-${deck.id}` });
 
   // Channel strip for the middle mixer column.
   const channelStrip = h('div', { class: `deck channel-strip deck-${deck.id}`, dataset: { accent } },
@@ -527,53 +637,22 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
   );
 
   const root = top; // dnd + legacy callers get the top fragment
-  const roots = [top, bottom, channelStrip];
+  const roots = [top, bottom, channelStrip, lane];
 
   /* ------------------------- rendering ------------------------- */
 
   let staticWave = null;
 
-  function drawStaticWave() {
+  /** Size the zoom canvas to its layout box (DPR-aware); painting is live. */
+  function sizeWave() {
     const w = wave.clientWidth || 600;
-    const hgt = 120;
-    wave.width = Math.floor(w * (window.devicePixelRatio || 1));
-    wave.height = Math.floor(hgt * (window.devicePixelRatio || 1));
-    const c = document.createElement('canvas');
-    c.width = wave.width;
-    c.height = wave.height;
-    const g = c.getContext('2d');
-    const dpr = window.devicePixelRatio || 1;
-    g.scale(dpr, dpr);
-    g.clearRect(0, 0, w, hgt);
-
-    const peaks = deck.peaks;
-    const mid = hgt / 2;
-    if (peaks) {
-      const n = peaks.length / 2;
-      const grad = g.createLinearGradient(0, 0, 0, hgt);
-      grad.addColorStop(0, accent === 'a' ? '#f7931a' : '#f3c244');
-      grad.addColorStop(0.5, accent === 'a' ? '#8a5410' : '#8a6f22');
-      grad.addColorStop(1, accent === 'a' ? '#f7931a' : '#f3c244');
-      g.fillStyle = grad;
-      for (let i = 0; i < n; i++) {
-        const x = (i / n) * w;
-        const bw = Math.max(1, w / n - 0.4);
-        const min = peaks[i * 2];
-        const max = peaks[i * 2 + 1];
-        const y0 = mid - max * mid * 0.95;
-        const y1 = mid - min * mid * 0.95;
-        g.fillRect(x, y0, bw, Math.max(1, y1 - y0));
-      }
-    }
-    g.strokeStyle = 'rgba(255,255,255,0.08)';
-    g.beginPath();
-    g.moveTo(0, mid);
-    g.lineTo(w, mid);
-    g.stroke();
-
-    drawBeatGrid(g, w, hgt, 0, deck.duration || 1);
-    staticWave = c;
+    const hgt = 64;
+    const bw = Math.floor(w * (window.devicePixelRatio || 1));
+    const bh = Math.floor(hgt * (window.devicePixelRatio || 1));
+    if (wave.width !== bw) wave.width = bw;
+    if (wave.height !== bh) wave.height = bh;
   }
+
 
   /**
    * Beat grid for a visible window [t0, t0+span]. Beat lines only while they
@@ -680,14 +759,22 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
     const w = wave.width / dpr;
     const hgt = wave.height / dpr;
     ctx2d.setTransform(1, 0, 0, 1, 0, 0);
+
+    if (!deck.duration) {
+      // Empty lane: the matrix rain runs until a track lands.
+      rain.draw(ctx2d, wave.width, wave.height);
+      laneOverlay.classList.add('show');
+      const og = overview.getContext('2d');
+      og.fillStyle = '#0d0b09';
+      og.fillRect(0, 0, overview.width, overview.height);
+      return;
+    }
+    laneOverlay.classList.remove('show');
     ctx2d.clearRect(0, 0, wave.width, wave.height);
-    const zoomed = view.zoom > 1.001;
-    if (!zoomed && staticWave) ctx2d.drawImage(staticWave, 0, 0);
     ctx2d.scale(dpr, dpr);
 
-    if (!deck.duration) return;
     const { t0, span } = viewWindow();
-    if (zoomed) drawWindowBars(ctx2d, w, hgt, t0, span);
+    drawWindowBars(ctx2d, w, hgt, t0, span);
     const x = (t) => ((t - t0) / span) * w;
 
     ctx2d.fillStyle = 'rgba(0,0,0,0.45)';
@@ -711,7 +798,70 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
     }
 
     ctx2d.fillStyle = '#fff';
+    if (deck.playing) {
+      ctx2d.shadowColor = '#f7931a';
+      ctx2d.shadowBlur = 10;
+    }
     ctx2d.fillRect(Math.max(0, Math.min(w - 1, x(deck.position))) - 1, 0, 2, hgt);
+    ctx2d.shadowBlur = 0;
+
+    drawOverview(t0, span);
+  }
+
+  /** The 20 px whole-track strip: dim bars + sections cached, live overlays. */
+  function drawOverview(t0, span) {
+    const w = overview.clientWidth || overview.width;
+    if (overview.width !== w) overview.width = w;
+    const hgt = overview.height;
+    const g = overview.getContext('2d');
+    if (!staticWave || staticWave.width !== w) buildOverviewStatic(w, hgt);
+    g.clearRect(0, 0, w, hgt);
+    if (staticWave) g.drawImage(staticWave, 0, 0);
+    const dur = deck.duration || 1;
+    const x = (t) => (t / dur) * w;
+    g.fillStyle = 'rgba(0,0,0,0.45)';
+    g.fillRect(0, 0, x(deck.position), hgt);
+    g.fillStyle = 'rgba(247,147,26,0.12)';
+    g.fillRect(x(t0), 0, Math.max(2, x(span)), hgt);
+    g.strokeStyle = 'rgba(247,147,26,0.6)';
+    g.strokeRect(x(t0) + 0.5, 0.5, Math.max(2, x(span)) - 1, hgt - 1);
+    if (deck.cuePoint > 0) {
+      g.fillStyle = '#ffd23f';
+      g.fillRect(x(deck.cuePoint) - 1, 0, 2, hgt);
+    }
+    g.fillStyle = '#fff';
+    g.fillRect(x(deck.position) - 1, 0, 2, hgt);
+  }
+
+  function buildOverviewStatic(w, hgt) {
+    const peaks = deck.peaks;
+    if (!peaks) return;
+    const c = document.createElement('canvas');
+    c.width = w;
+    c.height = hgt;
+    const g = c.getContext('2d');
+    g.fillStyle = '#0d0b09';
+    g.fillRect(0, 0, w, hgt);
+    const mid = hgt / 2;
+    const n = peaks.length / 2;
+    g.fillStyle = accent === 'a' ? '#8a5410' : '#8a6f22';
+    for (let i = 0; i < n; i++) {
+      const x = (i / n) * w;
+      const y0 = mid - peaks[i * 2 + 1] * mid * 0.9;
+      const y1 = mid - peaks[i * 2] * mid * 0.9;
+      g.fillRect(x, y0, Math.max(1, w / n), Math.max(1, y1 - y0));
+    }
+    const st = deck.structure;
+    if (st && st.ok) {
+      for (const s of st.sections) {
+        const a = st.firstBar + s.startBar * st.barLen;
+        const b = st.firstBar + s.endBar * st.barLen;
+        g.fillStyle = SECTION_COLORS[s.kind] || SECTION_COLORS.steady;
+        g.fillRect((a / (deck.duration || 1)) * w, hgt - 3,
+          ((b - a) / (deck.duration || 1)) * w, 3);
+      }
+    }
+    staticWave = c;
   }
 
   function render() {
@@ -804,9 +954,11 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
 
     fxSlots.forEach((s) => s.sync());
 
-    drawStaticWave();
+    sizeWave();
     drawWave();
   }
+
+  let lastFxSync = 0;
 
   /** Called from the global rAF loop. */
   function tick() {
@@ -820,11 +972,50 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
     const rate = deck.currentRate;
     bpmLive.textContent = deck.effectiveBpm ? deck.effectiveBpm.toFixed(1) : '—';
 
+    // Cheap DOM state first, canvases last: a throwing draw must never take
+    // the control readouts down with it (it did once, via a platter draw).
+    tickFilter();
+
     // The disc is drawn from the real rate, so brake, backspin and
     // hand-scratch all read correctly instead of a fixed CSS spin.
     record.draw();
     meter.draw();
-    tickFilter();
+
+    // Lane extras: live BPM readout, the playing EQ icon, level-hot platter.
+    const bpmNow = deck.effectiveBpm;
+    const bpmTxt = bpmNow ? bpmNow.toFixed(1) : '—';
+    if (laneBpm.textContent !== bpmTxt) laneBpm.textContent = bpmTxt;
+    eqIcon.classList.toggle('playing', deck.playing);
+    const lvl = deck.level();
+    platter.style.boxShadow = deck.playing
+      ? `0 0 ${Math.round(20 + lvl * 26)}px rgba(255, 106, 0, 0.32)` : '';
+    hotCueBtns.forEach((b, i) => b.classList.toggle('set', deck.hotCues[i] != null));
+    // Scratch state: light the matching quick button, keep the book in step.
+    scratchBtns.forEach((b, i) => b.classList.toggle('on', deck.autoScratch === SCRATCH_PATTERNS[i][1]));
+    if (document.activeElement !== scratchSel) {
+      const want = deck.autoScratch || '';
+      if (scratchSel.value !== want) scratchSel.value = want;
+    }
+    if (document.activeElement !== macroAmount) {
+      macroAmount.value = String(deck.macro.value);
+    }
+
+    // Motorized-fader feel: MIDI knobs, the automix and the live DJ all drive
+    // the engine directly — the on-screen controls follow the truth unless
+    // the user's hand (focus) is on them.
+    if (document.activeElement !== filterFader) filterFader.value = String(deck.filter);
+    for (const row of [eqHigh, eqMid, eqLow]) {
+      if (document.activeElement !== row.f) row.f.value = String(deck.eq[row.band]);
+      row.kill.classList.toggle('on', deck.eq[row.band] <= -25);
+    }
+    // FX slot state (echo punched in via a pad, macro over MIDI) at 4 Hz —
+    // sync() rewrites selects and labels, too hot for every frame.
+    const nowMs = performance.now();
+    if (nowMs - lastFxSync > 250) {
+      lastFxSync = nowMs;
+      const ae = document.activeElement;
+      if (!fxSection.contains(ae)) fxSlots.forEach((s) => s.sync());
+    }
     platter.classList.toggle('reverse', rate < -0.05);
     platter.classList.toggle('scratching', deck.scratching || deck.rewinding);
     platter.classList.toggle('spinning', Math.abs(rate) > 0.05);
@@ -841,7 +1032,7 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
       staticWave = null;
       record.invalidate();
     }
-    if (what === 'load') setZoom(1);
+    if (what === 'load') setZoom(8);
     if (what === 'tap') {
       const n = deck._taps.length;
       btnTap.textContent = n > 0 && n < 4 ? `TAP ${n}` : 'TAP';
@@ -858,5 +1049,8 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
   ro.observe(waveWrap);
 
   render();
-  return { root, roots, top, bottom, channelStrip, render, tick, tempoFader, pitchFader: tempoFader, volFader };
+  return {
+    root, roots, top, bottom, channelStrip, lane, render, tick, setZoom,
+    tempoFader, pitchFader: tempoFader, volFader,
+  };
 }

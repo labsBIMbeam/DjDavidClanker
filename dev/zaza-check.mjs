@@ -22,7 +22,7 @@ await frame.waitForSelector('.deck-A', { timeout: 15000 });
 
 // Search tab → term → search. The track list only gets DIRECT track-name
 // matches; artists arrive as side-panel chips (openArtist loads their tracks).
-await frame.locator('.tab').nth(1).click();
+await frame.locator('.tab', { hasText: 'Search' }).first().click();
 await frame.locator('.search-input').first().fill(TERM);
 await frame.locator('.side-group .btn-primary').click();
 

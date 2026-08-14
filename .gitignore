@@ -2,6 +2,7 @@ node_modules/
 dist/
 .napplet/
 *.log
+dev/.proxy-cache/
 ingest/.venv/
 ingest/data/
 ingest/test-data/

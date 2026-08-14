@@ -6,6 +6,12 @@
       "runtimeExecutable": "node",
       "runtimeArgs": ["dev/serve-shell.mjs"],
       "port": 5178
+    },
+    {
+      "name": "zaza",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["G:/Github/DavidClanker-zaza/dev/serve-shell.mjs"],
+      "port": 5180
     }
   ]
 }

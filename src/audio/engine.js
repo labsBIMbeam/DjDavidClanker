@@ -27,6 +27,7 @@ import { fetchBlob } from '../lib/nap.js';
 import { detectBpm, waveformPeaks, rms, analyzeStructure, detectKey, keyObject } from './analyze.js';
 import { trackCacheId, getAnalysis, putAnalysis } from '../lib/analysiscache.js';
 import { Turntable, reversedBuffer } from './scratch.js';
+import { AutoScratch } from './autoscratch.js';
 import { Flanger, Gater, Phaser, Echo, Reverb, ChannelFilter } from './fx.js';
 import { MacroFX, MACRO_TYPES } from './macrofx.js';
 
@@ -100,7 +101,8 @@ export class Deck extends Emitter {
     this._lastPhaseSeek = 0;
     this._taps = []; // tap-tempo ring: { t: wall ms, pos: track seconds }
     this.autoScratch = null; // active auto-scratch pattern name
-    this._as = null;
+    this._autoscratch = null; // AutoScratch instance, created on first use
+    this.hotCues = [null, null, null, null]; // also reset per load()
 
     /* vinyl */
     this.vinylMode = true;
@@ -181,7 +183,12 @@ export class Deck extends Emitter {
     gater.output.connect(echo.input);
     echo.output.connect(reverb.input);
     reverb.output.connect(macro.input);
-    macro.output.connect(gain).connect(analyser);
+    // scratchGate: the autoscratch's battle fader. It sits where a mixer's
+    // cut-in fader would, but per deck, so scratch cuts never fight the real
+    // crossfader, the channel fader or the other deck.
+    const scratchGate = ctx.createGain();
+    scratchGate.gain.value = 1;
+    macro.output.connect(gain).connect(scratchGate).connect(analyser);
     analyser.connect(this.mixer.crossGain[this.id]);
 
     // Pre-fader listen: tap after the FX chain (macro included) but before
@@ -195,7 +202,7 @@ export class Deck extends Emitter {
     macro.setType(this.macro.type);
     macro.setValue(this.macro.value);
 
-    this._graph = { trim, low, mid, high, filter, flanger, phaser, gater, echo, reverb, macro, gain, analyser, cueSend };
+    this._graph = { trim, low, mid, high, filter, flanger, phaser, gater, echo, reverb, macro, gain, scratchGate, analyser, cueSend };
     this._analyseBuf = new Float32Array(analyser.fftSize);
     this._turntable = new Turntable(ctx, trim);
     this._applyMix();
@@ -230,10 +237,12 @@ export class Deck extends Emitter {
     this._analysisDone = false;
     this._drop = null;
     this._taps = [];
+    // A running scripted scratch must not survive into the next track.
+    if (this._autoscratch && this._autoscratch.running) this._autoscratch.stop();
     this.autoScratch = null;
-    this._as = null;
     this.loop = { active: false, start: 0, end: 0, beats: 0 };
     this.cuePoint = 0;
+    this.hotCues = [null, null, null, null];
     this._pausedAt = 0;
     this._mode = 'idle';
     this.duration = track.duration || 0;
@@ -599,6 +608,28 @@ export class Deck extends Emitter {
     this.seek(this.cuePoint);
   }
 
+  /**
+   * Hot cues, CDJ semantics: an empty pad stores the current position, a set
+   * pad jumps there (and fires playback if the deck is stopped — that is
+   * what hot cues are for). Clearing is the UI's double-tap.
+   */
+  hotCue(i) {
+    if (!(i >= 0 && i < 4) || this.status !== 'ready') return;
+    if (this.hotCues[i] == null) {
+      this.hotCues[i] = this.position;
+    } else {
+      this.seek(this.hotCues[i]);
+      if (!this.playing) this.play({ instant: true });
+    }
+    this.emit('cue');
+  }
+
+  clearHotCue(i) {
+    if (!(i >= 0 && i < 4)) return;
+    this.hotCues[i] = null;
+    this.emit('cue');
+  }
+
   /* ---------------------------- loops ---------------------------- */
 
   /** Arm the loop-in point at the playhead (manual loop, first half). */
@@ -814,31 +845,8 @@ export class Deck extends Emitter {
   tickAudio(dt) {
     const step = clamp(dt, 0, 0.1);
 
-    // Auto-scratch: the scripted hand moves the platter each frame.
-    if (this.autoScratch && this._as && this.scratching) {
-      const as = this._as;
-      const beat = 60 / (this.effectiveBpm || 120);
-      as.t += step;
-      if (as.t >= as.bars * 4 * beat) {
-        this.stopAutoScratch();
-      } else {
-        const ph = (as.t % beat) / beat;
-        let rate = 0;
-        let gate = 1;
-        switch (this.autoScratch) {
-          case 'baby': rate = Math.sin(ph * 2 * Math.PI) * 1.8; break;
-          case 'scribble': rate = Math.sin((as.t / beat) * 8 * Math.PI) * 0.9; break;
-          case 'chirp': rate = ph < 0.5 ? 2.2 : -2.2; gate = ph < 0.5 ? 1 : 0; break;
-          case 'transformer': rate = 0.9; gate = (ph * 4) % 1 < 0.5 ? 1 : 0; break;
-          case 'backspin': rate = -(2 + (as.t / (as.bars * 4 * beat)) * 10); break;
-          default: break;
-        }
-        this.movePlatter(rate * step, step);
-        if (this._graph) {
-          this._graph.gain.gain.setTargetAtTime(gate * this.volume * this.trim, this.mixer.ctx.currentTime, 0.004);
-        }
-      }
-    }
+    // Auto-scratch runs on its own 5 ms audio-clock timer (see autoscratch.js)
+    // — the fader gates are AudioParam schedules and must not depend on rAF.
 
     if (this._mode === 'platter' && !this.scratching) {
       if (this.rewinding) {
@@ -1022,30 +1030,30 @@ export class Deck extends Emitter {
    * platter, driven from tickAudio (no timers of its own). Volume gating for
    * chirp/transformer cuts the deck channel, not the crossfader.
    */
-  toggleAutoScratch(pattern) {
-    if (this.autoScratch === pattern) return this.stopAutoScratch();
-    return this.startAutoScratch(pattern);
+  toggleAutoScratch(pattern, opts) {
+    if (!this.canVinyl || !this.bpm) return false;
+    if (!this._autoscratch) this._autoscratch = new AutoScratch(this);
+    const running = this._autoscratch.toggle(pattern, opts);
+    this.autoScratch = running ? this._autoscratch.pattern : null;
+    return running;
   }
 
-  startAutoScratch(pattern) {
-    if (!this.canVinyl || !this._reverse || !this.bpm) return false;
-    this.stopAutoScratch();
-    this.touchPlatter();
-    this.autoScratch = pattern;
-    this._as = { t: 0, bars: pattern === 'backspin' ? 1 : 2 };
-    this.emit('scratch');
-    return true;
+  startAutoScratch(pattern, opts) {
+    if (!this.canVinyl || !this.bpm) return false;
+    if (!this._autoscratch) this._autoscratch = new AutoScratch(this);
+    const ok = this._autoscratch.start(pattern, opts);
+    this.autoScratch = ok ? this._autoscratch.pattern : null;
+    return ok;
   }
 
   stopAutoScratch() {
-    if (!this.autoScratch) return;
+    if (this._autoscratch && this._autoscratch.running) this._autoscratch.stop();
     this.autoScratch = null;
-    this._as = null;
-    if (this._graph) {
-      this._graph.gain.gain.setTargetAtTime(this.volume * this.trim, this.mixer.ctx.currentTime, 0.01);
-    }
-    this.releasePlatter();
-    this.emit('scratch');
+  }
+
+  /** True while the scripted hand (not a human) is on the platter. */
+  get autoScratching() {
+    return Boolean(this._autoscratch && this._autoscratch.running);
   }
 
   /** Latch or release SYNC. While latched, tickAudio keeps the phase locked. */

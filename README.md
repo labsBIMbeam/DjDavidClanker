@@ -36,10 +36,15 @@ network access to a host shell.
 - **Waveform ring** around the record: the whole track laid onto 360°,
   stationary (a co-rotating waveform is unreadable), the played part glows,
   a needle marker shows the position.
-- Waveform with playhead and cue marker, click to jump — zoomable ×1–×64
-  (mouse wheel or −/+) with beat and bar markers anchored to the detected
-  downbeat
-- CUE with CDJ logic (set while stopped, jump back while playing)
+- **Wavedeck stage**: both waveforms as a mirrored, edge-to-edge pair at the
+  top — always a playhead-centered zoom window (default ×8, wheel/−/+ for
+  ×2–×64) over a full-track overview strip, with beat/bar markers anchored
+  to the detected downbeat. Drag scrubs the wave under the fixed playhead,
+  click jumps; a shared beat row (beat dots, phase, sync chip) sits under
+  the seam. Empty lanes run the 600B matrix rain
+- CUE with CDJ logic (set while stopped, jump back while playing), plus
+  **4 hot cues** per deck: empty pad stores, set pad jumps (fires from
+  stop), double-click clears
 - **Beat loops**: IN/OUT for manual loops, 1/2/4/8 snap onto the detected
   grid, EXIT leaves
 - **Tempo fader** ±8 / ±16 / ±50 %, BPM detection with beat phase and 4/4
@@ -87,6 +92,24 @@ network access to a host shell.
 - The machine **yields instantly** the moment you touch a control it is
   driving — grab the fader mid-blend and it is yours
 - Switching it on mid-set adopts the running deck instead of starting over
+
+**Turntablism**
+- **18 scratch moves in three families** (ported from Zazawowow's PR #8):
+  Foundation (baby, drag, scribble, 2/3-click tears, hydroplane, backspin),
+  Cuts (forward, stab, chirp) and Clicks (transformer, military, 1/2/3-click
+  flares, crab with finger jitter, orbit both ways, uzi, drag tear). A
+  scratch is modelled as record motion **plus** an independent fader-gate
+  schedule — the gates are sample-accurate AudioParam ramps on a per-deck
+  battle fader, latency-compensated against the grain player
+- Motion is analytic (velocity and displacement known at every instant), so
+  cycles land back on the anchor and nothing drifts; humanize jitter keeps
+  repeats from being bit-identical
+- Five quick buttons on each deck plus the full pattern book in a dropdown
+- **✦ PERFORM**: a bar-synced performer rides the running mix — scratch
+  bursts, loop rolls, FX bursts, filter sweeps, band isolation, fader chops
+  and blends. Each track gets a mood (usually calm; busy/peak only when the
+  music steps up), every gesture records its own undo, and anything a human
+  touches is released instantly
 
 **Sources**
 - **Wavlake** charts/search/genres (value4value — zap the artist while it

@@ -11,13 +11,40 @@
  */
 
 import http from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { createHash } from 'node:crypto';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..');
 const PORT = Number(process.env.PORT || 5178);
+
+// Disk cache for proxied upstreams. Wavlake goes through slow windows that
+// used to take every E2E suite (and any offline demo) down with it; a proxy
+// hit is served fresh when the upstream answers and from disk when it stalls.
+const CACHE_DIR = join(here, '.proxy-cache');
+await mkdir(CACHE_DIR, { recursive: true }).catch(() => {});
+const cachePaths = (target) => {
+  const k = createHash('sha1').update(target).digest('hex');
+  return { bin: join(CACHE_DIR, `${k}.bin`), meta: join(CACHE_DIR, `${k}.json`) };
+};
+async function cacheRead(target) {
+  try {
+    const p = cachePaths(target);
+    const meta = JSON.parse(await readFile(p.meta, 'utf8'));
+    return { buf: await readFile(p.bin), type: meta.type };
+  } catch {
+    return null;
+  }
+}
+function cacheWrite(target, type, buf) {
+  if (!buf.length || buf.length > 30e6) return;
+  const p = cachePaths(target);
+  writeFile(p.bin, buf)
+    .then(() => writeFile(p.meta, JSON.stringify({ type, url: target })))
+    .catch(() => {});
+}
 
 const ALLOW_HOSTS = [
   /(^|\.)wavlake\.com$/i, /(^|\.)cloudfront\.net$/i, /(^|\.)op3\.dev$/i,
@@ -73,14 +100,30 @@ const server = http.createServer(async (req, res) => {
         return send(res, 403, 'text/plain', `host not allowed: ${parsed.hostname}`);
       }
       // The egress path occasionally returns a transient 5xx; one retry keeps
-      // the dev experience from looking like an app bug.
-      let upstream = await fetch(target, { redirect: 'follow' });
-      if (upstream.status >= 500) {
-        await new Promise((r) => setTimeout(r, 400));
-        upstream = await fetch(target, { redirect: 'follow' });
+      // the dev experience from looking like an app bug. The upstream abort
+      // must stay comfortably below the napplet shim's own resource.bytes
+      // timeout (~10 s), or the cache fallback answers a request nobody is
+      // waiting for anymore.
+      const grab = (ms) => fetch(target, { redirect: 'follow', signal: AbortSignal.timeout(ms) });
+      let upstream = null;
+      try {
+        upstream = await grab(6000);
+        if (upstream.status >= 500) {
+          await new Promise((r) => setTimeout(r, 400));
+          upstream = await grab(4000);
+        }
+      } catch {
+        upstream = null;
+      }
+      if (!upstream || upstream.status >= 500) {
+        const hit = await cacheRead(target);
+        if (hit) return send(res, 200, hit.type, hit.buf, { 'x-proxy-cache': 'stale' });
+        if (!upstream) return send(res, 504, 'text/plain', 'upstream timeout');
       }
       const buf = Buffer.from(await upstream.arrayBuffer());
-      return send(res, upstream.status, upstream.headers.get('content-type') || 'application/octet-stream', buf);
+      const type = upstream.headers.get('content-type') || 'application/octet-stream';
+      if (upstream.ok) cacheWrite(target, type, buf);
+      return send(res, upstream.status, type, buf);
     }
     send(res, 404, 'text/plain', 'not found');
   } catch (e) {

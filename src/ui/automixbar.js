@@ -1,7 +1,14 @@
 import { h, fader } from './dom.js';
 
 /** Control strip for the Automix: on/off, skip, fade length, sync, shuffle. */
-export function AutomixBar(automix, { onQueueFromBrowser }) {
+export function AutomixBar(automix, { onQueueFromBrowser, performer = null }) {
+  const btnPerf = h('button', {
+    class: 'btn btn-perf',
+    title: 'Performer: bar-synced scratches, loop rolls, FX bursts and blends over the running mix — every gesture undoes itself, and your hand always wins',
+    onclick: () => { if (performer) performer.toggle(); },
+    style: performer ? {} : { display: 'none' },
+  }, '✦ PERFORM');
+  const perfInfo = h('span', { class: 'perf-info' }, '');
   const btnOn = h('button', {
     class: 'btn btn-automix',
     title: 'Automix: loads, beatmatches and crossfades on its own (X)',
@@ -13,10 +20,10 @@ export function AutomixBar(automix, { onQueueFromBrowser }) {
   }, '▶▶ AUTOMIX');
 
   const btnNext = h('button', {
-    class: 'btn btn-mini',
-    title: 'Crossfade now (N)',
+    class: 'btn btn-mixnow',
+    title: 'Transition now (N)',
     onclick: () => automix.skip(),
-  }, '⏭');
+  }, 'MIX NOW');
 
   const btnLoad = h('button', {
     class: 'btn btn-mini',
@@ -80,6 +87,8 @@ export function AutomixBar(automix, { onQueueFromBrowser }) {
       btnStyle,
       btnSync,
       btnOrder,
+      btnPerf,
+      perfInfo,
     ),
   );
 
@@ -114,6 +123,14 @@ export function AutomixBar(automix, { onQueueFromBrowser }) {
     }
     meter.firstChild.style.width = `${pct}%`;
     meter.classList.toggle('hot', Boolean(automix.fade || automix.transition));
+
+    if (performer) {
+      btnPerf.classList.toggle('on', performer.enabled);
+      const info = performer.enabled
+        ? `${(performer.mood || '').toUpperCase()}${performer.lastAction ? ' · ' + performer.lastAction : ''}`
+        : '';
+      if (perfInfo.textContent !== info) perfInfo.textContent = info;
+    }
   }
 
   // Chain onto whatever hook the caller already installed rather than
