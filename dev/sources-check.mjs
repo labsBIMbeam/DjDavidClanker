@@ -295,7 +295,13 @@ try {
     const fxDown = dj.decks.A.fx[dj.decks.A.fxSlots[0]].on;
     dj.midi.handle([0x80, 45, 0]); // pad 10 up: punch out
     const fxUp = dj.decks.A.fx[dj.decks.A.fxSlots[0]].on;
-    return { played, xfRight, cue, filt, fltLabel, mcrLabel, fxDown, fxUp };
+    // Top pad row: pad 13 throws whatever move the dropdown armed.
+    dj.decks.A.scratchChoice = 'flare2';
+    dj.midi.handle([0x90, 48, 100]);
+    const scratchOn = dj.decks.A.autoScratching && dj.decks.A.autoScratch === 'flare2';
+    dj.midi.handle([0x90, 48, 100]);
+    const scratchOff = !dj.decks.A.autoScratching;
+    return { played, xfRight, cue, filt, fltLabel, mcrLabel, fxDown, fxUp, scratchOn, scratchOff };
   });
   check('MIDI: pad 1 toggles deck A transport', midi.played === true);
   check('MIDI: K5/K6 drive crossfader and cue volume', midi.xfRight === 1 && midi.cue === 1,
@@ -305,6 +311,9 @@ try {
   check('MIDI: K3 drives the macro and the echo readout shows it',
     midi.mcrLabel.startsWith('HP DUB ECHO'), `"${midi.mcrLabel}"`);
   check('MIDI: FX pad is momentary (hold to ride)', midi.fxDown === true && midi.fxUp === false);
+  check('MIDI: top pad throws the armed scratch move and toggles off',
+    midi.scratchOn === true && midi.scratchOff === true,
+    `on=${midi.scratchOn} off=${midi.scratchOff}`);
 
   await page.screenshot({ path: `${OUT}-server.png`, fullPage: true });
 } finally {

@@ -86,6 +86,64 @@ const menuChips4 = await frame.locator('.side-group .chip', { hasText: '♪' }).
 const plRows4 = await frame.locator('.track-row').count();
 check('remove updates menu and view', menuChips4 === 10 && plRows4 === 10, `${menuChips4} chips / ${plRows4} rows`);
 
+/* --------------- setlist: the crate with performance marks --------------- */
+
+// Star the loaded deck-A track with marks set, write back another hot cue,
+// reload it via a detour and the marks must come home. All engine truth.
+const set = await frame.evaluate(async () => {
+  const dj = window.__djclanker;
+  const A = dj.decks.A;
+  const id = A.track.id;
+  A.seek(2); A.cue(); // cue point at 2 s (deck is paused after load)
+  A.seek(4); A.hotCue(1);
+  // Find the loaded track's row by its DECK A marker — indexes shifted
+  // after the removal check above.
+  const row = [...document.querySelectorAll('.track-row')]
+    .find((r) => (r.querySelector('.row-marker') || {}).textContent === 'DECK A');
+  row.querySelector('.row-star').click();
+  const stored = dj.setlist.cuesFor(id);
+  A.seek(6); A.hotCue(2); // write-back AFTER starring
+  await new Promise((r) => setTimeout(r, 100));
+  const written = dj.setlist.cuesFor(id);
+  return { added: dj.setlist.has(id), stored, written, id };
+});
+check('setlist: ☆ takes the deck marks along',
+  set.added && set.stored && set.stored.cue === 2 && set.stored.hot[1] === 4,
+  JSON.stringify(set.stored));
+check('setlist: later marks write back live',
+  set.written && set.written.hot[2] === 6, JSON.stringify(set.written));
+
+// Detour over another track, then reload — marks restore onto the deck.
+await frame.locator('.track-row').nth(0).locator('.load-a').click();
+await frame.waitForFunction((id) => {
+  const A = window.__djclanker.decks.A;
+  return A.status === 'ready' && A.track.id !== id;
+}, set.id, { timeout: 120000 });
+await frame.locator('.track-row', { hasText: addedTitle }).first().locator('.load-a').click();
+await frame.waitForFunction((id) => {
+  const A = window.__djclanker.decks.A;
+  return A.status === 'ready' && A.track.id === id;
+}, set.id, { timeout: 120000 });
+const restored = await frame.evaluate(() => {
+  const A = window.__djclanker.decks.A;
+  return { cue: A.cuePoint, hot: A.hotCues };
+});
+check('setlist: loading a listed track restores its marks',
+  restored.cue === 2 && restored.hot[1] === 4 && restored.hot[2] === 6,
+  JSON.stringify(restored));
+
+// The setlist view: badge, running-order controls, sources hidden below.
+await frame.locator('.mode-setlist').click();
+await page.waitForTimeout(300);
+const view = await frame.evaluate(() => ({
+  rows: document.querySelectorAll('.track-row').length,
+  badge: (document.querySelector('.cue-badge') || {}).textContent || '',
+  tabsHidden: getComputedStyle(document.querySelector('.browser-tabs')).display === 'none',
+}));
+check('setlist view: marks badge + sources tucked away',
+  view.rows === 1 && view.badge.includes('hot') && view.tabsHidden,
+  JSON.stringify(view));
+
 await page.screenshot({ path: `${OUT}-crate.png`, fullPage: true });
 await browser.close();
 

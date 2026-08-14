@@ -173,22 +173,33 @@ await frame.evaluate(() => {
 await page.waitForTimeout(600);
 await frame.evaluate(() => {
   const { A, B } = window.__djclanker.decks;
+  // Engage = tempo match + latch. Phase is BENT in by the latch over a few
+  // seconds now (never seeked — a seek is an audible beat jump).
   B.syncTo(A);
+  B.setSynced(A);
 });
-await page.waitForTimeout(800);
+await page.waitForTimeout(6500);
 const sync = await frame.evaluate(() => {
   const { A, B } = window.__djclanker.decks;
   const mod = (x, m) => ((x % m) + m) % m;
-  const beatA = 60 / A.effectiveBpm;
-  const beatB = 60 / B.effectiveBpm;
+  // Track-grid phase: 60/BASE bpm against track positions, same as the engine.
+  const beatA = 60 / A.bpm;
+  const beatB = 60 / B.bpm;
   const pa = mod(A.position - (A.beatOffset || 0), beatA) / beatA;
   const pb = mod(B.position - (B.beatOffset || 0), beatB) / beatB;
   let err = Math.abs(pa - pb);
   if (err > 0.5) err = 1 - err;
-  return { tempoB: B.tempo, err, bpmA: A.effectiveBpm, bpmB: B.effectiveBpm };
+  // Nudge-free effective bpm: the latch is still bending the phase in, and
+  // the momentary rate must not read as a tempo mismatch.
+  return { tempoB: B.tempo, err, bpmA: A.effectiveBpm, bpmB: B.bpm * (1 + B.tempo / 100) };
 });
 check('sync matched the tempo', Math.abs(sync.bpmA - sync.bpmB) < 0.05, `${sync.bpmA.toFixed(2)} vs ${sync.bpmB.toFixed(2)}`);
-check('sync landed on the beat grid', sync.err < 0.06, `phase error ${(sync.err * 100).toFixed(1)} % of a beat`);
+check('sync bends onto the beat grid (no seek)', sync.err < 0.08, `phase error ${(sync.err * 100).toFixed(1)} % of a beat`);
+await frame.evaluate(() => {
+  const B = window.__djclanker.decks.B;
+  B.setSynced(null);
+  B.setNudge(0);
+});
 
 /* ----------------------------- cue bus ----------------------------- */
 
@@ -257,19 +268,20 @@ await frame.evaluate(() => {
   const { A, B } = window.__djclanker.decks;
   B.seek(B.position + 0.31 * (60 / A.effectiveBpm));
 });
-await page.waitForTimeout(3500);
+// Bend-only recovery: 0.31 of a beat rides in over several seconds.
+await page.waitForTimeout(7000);
 const caught = await frame.evaluate(() => {
   const { A, B } = window.__djclanker.decks;
   const mod = (x, m) => ((x % m) + m) % m;
-  const beatA = 60 / A.effectiveBpm;
-  const beatB = 60 / B.effectiveBpm;
+  const beatA = 60 / A.bpm;
+  const beatB = 60 / B.bpm;
   const pa = mod(A.position - (A.beatOffset || 0), beatA) / beatA;
   const pb = mod(B.position - (B.beatOffset || 0), beatB) / beatB;
   let err = Math.abs(pa - pb);
   if (err > 0.5) err = 1 - err;
   return err;
 });
-check('latch re-catches a perturbed deck', caught < 0.06, `error ${(caught * 100).toFixed(1)} % of a beat`);
+check('latch re-catches a perturbed deck by bending', caught < 0.08, `error ${(caught * 100).toFixed(1)} % of a beat`);
 
 await frame.locator('.deck-B .btn-sync').click();
 await page.waitForTimeout(300);

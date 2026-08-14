@@ -348,6 +348,10 @@ await frame.evaluate(() => {
   // Reversed so the second cycle stages Beta while Alpha is live — a real
   // A→B→A rotation instead of the same file on both decks.
   dj.automix.setQueue([...dj.browser.currentItems()].reverse());
+  // Deterministic transitions for parts 1-2: the seam budget would otherwise
+  // roll a cut/spinback under the blend assertions. The budget's own dice
+  // are asserted separately in part 2b with an injected rng.
+  dj.automix.markedRate = 0;
   if (!dj.automix.enabled) dj.automix.toggle();
 });
 
@@ -437,6 +441,68 @@ await frame.evaluate(() => {
   dj.decks.A.pause();
   dj.decks.B.pause();
 });
+
+/* ---------------- part 2c: manual tempo master + seamless latch ---------------- */
+
+// The fixtures sit 124/120 BPM apart — inside the ±8 % range, so a manual
+// SYNC latches without any tempo-range games.
+const master = await frame.evaluate(async () => {
+  const dj = window.__djclanker;
+  const A = dj.decks.A, B = dj.decks.B;
+  const live = dj.automix.liveDeck || A;
+  const other = dj.mixer.decks[live.id === 'A' ? 'B' : 'A'];
+  live.play(); other.play();
+  await new Promise((r) => setTimeout(r, 300));
+
+  dj.mixer.syncMaster = live.id;
+  const tempoBefore = live.tempo;
+  live.emit('sync-request'); // SYNC on the master must refuse
+  const blocked = live.syncedTo === null && live.tempo === tempoBefore;
+
+  other.emit('sync-request'); // SYNC on the slave pulls it onto the master
+  const latched = other.syncedTo === live;
+  const bpmOk = Math.abs(other.effectiveBpm - live.effectiveBpm) < 0.5;
+
+  // Knock the slave a third of a beat out on purpose: the latch must bend
+  // it back with rate only — tape-like position, no seek jumps.
+  const mod = (x, m) => ((x % m) + m) % m;
+  const phaseErr = () => {
+    const bl = 60 / live.bpm, bo = 60 / other.bpm;
+    let e = mod(other.position - (other.beatOffset || 0), bo) / bo
+      - mod(live.position - (live.beatOffset || 0), bl) / bl;
+    if (e > 0.5) e -= 1;
+    if (e < -0.5) e += 1;
+    return Math.abs(e);
+  };
+  other.seek(other.position + 0.33 * (60 / other.bpm));
+  await new Promise((r) => setTimeout(r, 200));
+  const errStart = phaseErr();
+  const jumps = [];
+  let sawBend = false;
+  let last = { t: performance.now(), p: other.position };
+  for (let i = 0; i < 14; i++) {
+    await new Promise((r) => setTimeout(r, 300));
+    const now = { t: performance.now(), p: other.position };
+    jumps.push(Math.abs((now.p - last.p) - ((now.t - last.t) / 1000) * other.currentRate));
+    if (other.nudgeAmount !== 0) sawBend = true;
+    last = now;
+  }
+  const errEnd = phaseErr();
+
+  dj.mixer.syncMaster = null;
+  other.setSynced(null);
+  live.pause(); other.pause();
+  return { blocked, latched, bpmOk, errStart, errEnd, maxJump: Math.max(...jumps), sawBend };
+});
+check('tempo master: SYNC on the master itself refuses', master.blocked);
+check('tempo master: SYNC pulls the other deck onto the master',
+  master.latched && master.bpmOk, `latched=${master.latched} bpmOk=${master.bpmOk}`);
+check('latch catches phase by bending, never by seeking',
+  master.maxJump < 0.12 && master.sawBend,
+  `maxJump=${master.maxJump.toFixed(3)}s bend=${master.sawBend}`);
+check('latch phase error shrinks toward zero',
+  master.errEnd < Math.max(0.1, master.errStart * 0.6),
+  `${master.errStart.toFixed(3)} → ${master.errEnd.toFixed(3)} beats`);
 
 /* ---------------------- part 3: smart selection ---------------------- */
 

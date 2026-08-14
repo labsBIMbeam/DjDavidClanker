@@ -95,35 +95,25 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
   const platter = record.root;
   const jogHint = h('div', { class: 'jog-hint' }, 'VINYL');
 
-  const SCRATCH_PATTERNS = [
-    ['BABY', 'baby'],
-    ['SCRB', 'scribble'],
-    ['CHRP', 'chirp'],
-    ['TRNS', 'transformer'],
-    ['BSPN', 'backspin'],
-  ];
-  const scratchBtns = SCRATCH_PATTERNS.map(([label, id]) =>
-    h('button', {
-      class: 'btn btn-mini btn-scratch',
-      title: `Auto-scratch: ${id} (loops until toggled off; tap again to stop)`,
-      onclick: () => deck.toggleAutoScratch(id),
-    }, label));
-
-  // The full pattern book behind the quick buttons: every move from the
-  // autoscratch library, grouped by family. Picking one starts it (or swaps
-  // it in live); picking the top entry stops.
-  const scratchSel = h('select', { class: 'scratch-sel', title: 'All scratch moves — pick to start, first entry stops' },
-    h('option', { value: '' }, 'SCRATCH…'),
+  // One dropdown arms a move from the full book, one button throws it —
+  // the same button the top MIDI pad row hits (deck.scratchChoice).
+  const scratchSel = h('select', { class: 'scratch-sel', title: 'Arm a scratch move (the SCRATCH button and the top MIDI pad throw it)' },
     ...[...scratchFamilies()].map(([family, list]) =>
       h('optgroup', { label: family },
         ...list.map((p) => h('option', { value: p.key, title: p.blurb }, p.label)))),
   );
+  scratchSel.value = deck.scratchChoice;
   scratchSel.addEventListener('change', () => {
-    const key = scratchSel.value;
-    if (!key) deck.stopAutoScratch();
-    else if (deck.autoScratch !== key) deck.toggleAutoScratch(key);
+    deck.scratchChoice = scratchSel.value;
+    // Mid-scratch the pick swaps in live at the next cycle boundary.
+    if (deck.autoScratching) deck.toggleAutoScratch(deck.scratchChoice);
   });
-  const scratchRow = h('div', { class: 'scratch-row' }, ...scratchBtns, scratchSel);
+  const btnScratchGo = h('button', {
+    class: 'btn btn-scratch btn-scratch-go',
+    title: 'Throw the armed scratch move — loops until you tap again (top MIDI pad row)',
+    onclick: () => deck.toggleAutoScratch(deck.scratchChoice),
+  }, 'SCRATCH');
+  const scratchRow = h('div', { class: 'scratch-row' }, scratchSel, btnScratchGo);
 
   // Classic channel meter under the wave — level with red overshoot,
   // replacing the old oscilloscope view.
@@ -237,7 +227,12 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
     title: 'Tap tempo: hit this on every beat — from the 4th tap BPM and beat grid are set for the whole track',
     onclick: () => deck.tapBeat(),
   }, 'TAP');
-  const btnSync = h('button', { class: 'btn btn-sync', title: 'Latch tempo and beat phase onto the other deck' }, 'SYNC');
+  const btnMaster = h('button', {
+    class: 'btn btn-mini btn-master',
+    title: 'Tempo master: while lit, SYNC always pulls the OTHER deck onto this one and never touches this deck',
+    onclick: () => deck.emit('master-request'),
+  }, 'MST');
+  const btnSync = h('button', { class: 'btn btn-sync', title: 'Latch tempo and beat phase onto the tempo master (or the other deck)' }, 'SYNC');
   const btnDrop = h('button', {
     class: 'btn btn-mini btn-drop',
     title: 'Start on the other deck\'s next bar-1 — tempo synced, entry from cue snapped to your own 1. Press again to cancel',
@@ -578,10 +573,11 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
   // legacy `deck-top`/`deck-bottom` classes so every suite selector keeps
   // resolving.
   const eqIcon = h('span', { class: 'eq-ico' }, h('i'), h('i'), h('i'));
+  const laneMst = h('span', { class: 'lane-mst', title: 'This deck is the tempo master' }, 'MST');
   const laneBpm = h('span', { class: 'lane-bpm bpm-live' }, '—');
   const lane = h('div', { class: `deck deck-lane deck-${deck.id}`, dataset: { accent } },
     h('div', { class: 'lane-cap' },
-      h('div', { class: 'lane-deck' }, `DECK ${deck.id}`, eqIcon),
+      h('div', { class: 'lane-deck' }, `DECK ${deck.id}`, eqIcon, laneMst),
       title,
       h('div', { class: 'deck-times' }, timeCur, h('span', { class: 'sep' }, '·'), timeRem),
       h('div', { class: 'lane-actions' }, btnZap, btnEject),
@@ -616,14 +612,8 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
   const hotCueRow = h('div', { class: 'hotcue-row' },
     h('span', { class: 'lbl-sub' }, 'HOT CUES'), ...hotCueBtns);
 
-  // The macro amount as a first-class deck control (LP ← off → HP).
-  const macroAmount = fader({
-    min: -1, max: 1, step: 0.01, value: deck.macro.value, orient: 'h',
-    label: `Macro deck ${deck.id}`, className: 'macro macro-main',
-    onInput: (v) => deck.setMacroValue(v),
-  });
-  const macroRow = h('div', { class: 'macro-main-row' },
-    h('span', { class: 'lbl-sub' }, 'MACRO · LP'), macroAmount, h('span', { class: 'lbl-sub' }, 'HP'));
+  // No dedicated macro fader in the cluster: the MIDI knobs (K3/K4) and the
+  // FX-slot bodies drive the macro, and the big readout shows where it sits.
 
   // CDJ geometry: the pitch fader rides directly beside the jog wheel, the
   // FX units stack vertically on the performance side.
@@ -645,6 +635,7 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
     h('div', { class: 'cluster-right deck-tempo' },
       h('div', { class: 'perf-row' },
         h('div', { class: 'bpm-base-row' }, h('span', { class: 'lbl-sub' }, 'BASE'), bpmField, btnTap),
+        btnMaster,
         btnSync,
         btnDrop,
       ),
@@ -652,7 +643,6 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
       hotCueRow,
       loopRow,
       fxSection,
-      macroRow,
     ),
   ));
   top.appendChild(meterRow);
@@ -959,10 +949,8 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
     btnLoopOut.disabled = !loopReady || deck.loop.active;
 
     const scratchReady = deck.canVinyl && Boolean(deck._reverse) && deck.bpm > 0;
-    scratchBtns.forEach((b, i) => {
-      b.disabled = !scratchReady;
-      b.classList.toggle('on', deck.autoScratch === SCRATCH_PATTERNS[i][1]);
-    });
+    btnScratchGo.disabled = !scratchReady;
+    scratchSel.disabled = !scratchReady;
     btnTap.disabled = deck.backend !== 'buffer';
     beatLoopBtns.forEach((b, i) => b.classList.toggle('on', deck.loop.active && deck.loop.beats === LOOP_BEATS[i]));
     btnLoopExit.classList.toggle('on', deck.loop.active);
@@ -1021,20 +1009,19 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
     const bpmTxt = bpmNow ? bpmNow.toFixed(1) : '—';
     if (laneBpm.textContent !== bpmTxt) laneBpm.textContent = bpmTxt;
     eqIcon.classList.toggle('playing', deck.playing);
+    const isMaster = deck.mixer.syncMaster === deck.id;
+    btnMaster.classList.toggle('on', isMaster);
+    laneMst.classList.toggle('show', isMaster);
     const lvl = deck.level();
     platter.style.boxShadow = deck.playing
       ? `0 0 ${Math.round(20 + lvl * 26)}px rgba(255, 106, 0, 0.32)` : '';
     hotCueBtns.forEach((b, i) => b.classList.toggle('set', deck.hotCues[i] != null));
-    // Scratch state: light the matching quick button, keep the book in step.
-    scratchBtns.forEach((b, i) => b.classList.toggle('on', deck.autoScratch === SCRATCH_PATTERNS[i][1]));
-    if (document.activeElement !== scratchSel) {
-      const want = deck.autoScratch || '';
-      if (scratchSel.value !== want) scratchSel.value = want;
+    // Scratch state: the GO button burns while the scripted hand is on the
+    // record; the dropdown mirrors the armed choice (MIDI may swap it).
+    btnScratchGo.classList.toggle('on', deck.autoScratching);
+    if (document.activeElement !== scratchSel && scratchSel.value !== deck.scratchChoice) {
+      scratchSel.value = deck.scratchChoice;
     }
-    if (document.activeElement !== macroAmount) {
-      macroAmount.value = String(deck.macro.value);
-    }
-
     // Motorized-fader feel: MIDI knobs, the automix and the live DJ all drive
     // the engine directly — the on-screen controls follow the truth unless
     // the user's hand (focus) is on them.

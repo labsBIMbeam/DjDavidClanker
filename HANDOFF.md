@@ -1,6 +1,6 @@
 # Handoff — DJ David Clanker
 
-As of: August 13, 2026 · Status: **working, 206 E2E checks across 9 suites + 9 pytest green**
+As of: August 14, 2026 · Status: **working, 215 E2E checks across 9 suites + 9 pytest green**
 
 This document is for the person who touches the project next — whether that's
 you in three months or someone else. It describes what is built, **why it is
@@ -596,7 +596,8 @@ Interactions with non-obvious behavior:
 | Platter | angle-based, not x-based: one revolution = 1.8 s of audio, no matter where you grab |
 | CUE | stopped: set the point. Playing: jump back and pause |
 | REW | hold. Target speed grows with hold time up to −14× |
-| SYNC | **latch**: engaging matches BPM (incl. half/double and 2:3 levels) and then holds the phase permanently — micro-nudge for small errors, hard realign for large ones. A second click releases |
+| SYNC | **latch**: engaging matches BPM (incl. half/double and 2:3 levels) onto the tempo master (MST — or the opposite deck when none is set) and then holds the phase permanently by **bending the rate only** (staged 0.8/2/4 % toward the nearest beat; half a beat rides in over ~6 s). It NEVER seeks — seeking is audible as a beat jump, and the old hard realigns were also masking a grid bug (phase must be computed on the track grid, 60/BASE bpm, not 60/effective). A second click releases |
+| MST (tempo master) | marks this deck as the manual tempo master: SYNC always pulls the OTHER deck onto it and refuses on the master itself — syncing the live deck onto the silent one by habit becomes impossible. Lane badge + lit button show who leads; toggle off to return to opposite-deck syncing. The automix ignores it (its transitions sync incoming onto outgoing by construction) |
 | LOOP bar | IN/OUT for manual loops, 1/2/4/8 snap onto the beat grid, EXIT leaves. An active loop holds off the Automix transition |
 | 📁 LOCAL / drag & drop | local audio files into the list or straight onto a deck — always FULL mode, no zap target, not in the persistent playlist |
 | BPM display | large = effective (base × tempo fader), small editable = BASE |
@@ -619,9 +620,10 @@ Interactions with non-obvious behavior:
 | UP NEXT rail | right of the track list: the next three queue entries as cards (Q1 highlighted), "+ QUEUE FROM LIST" fills the queue from the current view |
 | DROP (keys 3/4) | starts the deck sample-accurately on the other deck's next bar-1 — tempo synced beforehand, own entry point = cue snapped to its own 1, CDJ start without vinyl spin-up. Pressing again aborts |
 | TAP (keys T/U) | tap tempo: hit it on every beat. Uses playback-position deltas (median), so it yields the BASE bpm regardless of the tempo fader; from the 4th tap BPM + beat grid are set and marked manual. Taps give the beat, not the 1 — `barOffset` re-anchors to the tapped grid |
-| Auto-scratch (quick buttons + SCRATCH… book) | scripted turntablism over the granular platter (`src/audio/autoscratch.js`, ported from PR #8): 20 patterns in Foundation/Cuts/Clicks families. Record motion is analytic (no drift, cycles return to the anchor — except backspin, which is `free`), the fader gates are sample-accurate ramps on the per-deck `scratchGate` node, offset by `GRAIN_LATENCY` so clicks land on what the grain queue is actually playing. Loops until toggled off; picking another pattern swaps at the next cycle. The one sanctioned timer in the app (5 ms) — gates schedule against the audio clock and must survive a hidden tab |
+| Auto-scratch (dropdown + SCRATCH button) | scripted turntablism over the granular platter (`src/audio/autoscratch.js`, ported from PR #8): 20 patterns in Foundation/Cuts/Clicks families. The dropdown ARMS a move (`deck.scratchChoice`, survives loads); the SCRATCH button — and the top MIDI pad row — throws it, loops until tapped off, and a repick mid-scratch swaps at the next cycle boundary. Record motion is analytic (no drift, cycles return to the anchor — except backspin, which is `free`), the fader gates are sample-accurate ramps on the per-deck `scratchGate` node, offset by `GRAIN_LATENCY` so clicks land on what the grain queue is actually playing. The one sanctioned timer in the app (5 ms) — gates schedule against the audio clock and must survive a hidden tab |
 | ✦ PERFORM (automix bar) | bar-synced performer (`src/audio/performer.js`, ported from PR #8): per-track mood (weighted toward calm) rolls gestures — scratch bursts, loop rolls, FX bursts, filter sweeps, band isolation, fader chops, blends. Every gesture registers an undo that fires when its bars expire or a human touches the deck; crossfader gestures stand down while the automix runs a handover. Mood + last action read out next to the button |
 | "+" on a track row / "+ all → playlist" above the list | adds the track(s) to the playlist (Crate tab). There: a menu of all entries, × removes, "Show playlist" renders it as a loadable list |
+| ★ SETLIST (mode row above the source tabs) | the DJ's own ordered crate (`src/lib/setlist.js`, blob `setlist.v1`). ☆ on any row adds the track — with the deck's CURRENT marks when it is loaded; setting a cue or hot cue on a listed track writes back live (debounced persist); loading a listed track restores its marks onto the deck. In setlist mode rows carry ▲▼ running-order controls and a marks badge; the source tabs hide (they are one level below) |
 
 ---
 

@@ -6,6 +6,8 @@
  * (outer = deck edge, inner = the shared middle), no automix pads:
  *
  *   13 A·SCRATCH  14 A·BACKSPIN  15 B·BACKSPIN  16 B·SCRATCH
+ *      (SCRATCH throws the move armed in the deck's dropdown — same as the
+ *       on-screen SCRATCH button; tap again to stop, repick to swap live)
  *    9 A·LOOP 4   10 A·FX hold   11 B·FX hold   12 B·LOOP 4
  *    5 A·SYNC      6 A·DROP       7 B·DROP       8 B·SYNC
  *    1 A·PLAY      2 A·CUE        3 B·CUE        4 B·PLAY
@@ -50,9 +52,9 @@ export function createMidi({ mixer, automix, onCrossfade, onStatus }) {
     'b.loop4': () => decks.B.setLoopBeats(4),
     'a.fx': (down) => decks.A.toggleFx(decks.A.fxSlots[0], down),
     'b.fx': (down) => decks.B.toggleFx(decks.B.fxSlots[0], down),
-    'a.scratch': () => decks.A.toggleAutoScratch('baby'),
+    'a.scratch': () => decks.A.toggleAutoScratch(decks.A.scratchChoice),
     'a.backspin': () => decks.A.toggleAutoScratch('backspin'),
-    'b.scratch': () => decks.B.toggleAutoScratch('baby'),
+    'b.scratch': () => decks.B.toggleAutoScratch(decks.B.scratchChoice),
     'b.backspin': () => decks.B.toggleAutoScratch('backspin'),
   };
 

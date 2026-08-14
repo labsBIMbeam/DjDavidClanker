@@ -11,6 +11,7 @@ import {
   archiveSearch, archiveItem,
 } from '../lib/discover.js';
 import { camelotFor } from '../audio/analyze.js';
+import { setlist } from '../lib/setlist.js';
 
 /** "124 · 8B" chip when the track's analysis is cached; null otherwise. */
 function keyBpmChip(t) {
@@ -28,8 +29,10 @@ const CRATE_KEY = 'crate.v1';
  * crate (single tracks as playlist + artists/albums as sources), and
  * kind-30003 sets from Nostr.
  */
-export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckState, onQueueFromBrowser }) {
+export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckState, onQueueFromBrowser, getDeckCues }) {
   let tab = 'charts';
+  /** 'setlist' shows the DJ's own ordered crate; 'sources' the tabs below it. */
+  let mode = 'sources';
   /** Rendered rows for the marker pass: { el, chip, track }. */
   let rowRefs = [];
   const railEl = h('div', { class: 'upnext' });
@@ -61,6 +64,19 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckSt
     'aria-label': 'Nostr pubkey',
   });
 
+  function openTab(key) {
+    mode = 'sources';
+    tab = key;
+    listEpoch++; // whatever is still in flight belongs to the old tab
+    syncMode();
+    renderSide();
+    if (key === 'charts') loadCharts(40);
+    else if (key === 'crate') showCrateHome();
+    else if (key === 'server') showServerHome();
+    else if (key === 'discover') showDiscoverHome();
+    else renderList();
+  }
+
   const tabs = [
     ['charts', 'Charts'],
     ['search', 'Search'],
@@ -69,20 +85,55 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckSt
     ['crate', 'Crate'],
     ['nostr', 'Nostr'],
   ].map(([key, label]) =>
-    h('button', {
-      class: 'tab',
-      onclick: () => {
-        tab = key;
-        listEpoch++; // whatever is still in flight belongs to the old tab
-        renderSide();
-        if (key === 'charts') loadCharts(40);
-        else if (key === 'crate') showCrateHome();
-        else if (key === 'server') showServerHome();
-        else if (key === 'discover') showDiscoverHome();
-        else renderList();
-      },
-    }, label),
+    h('button', { class: 'tab', onclick: () => openTab(key) }, label),
   );
+
+  /* ------------------------------ setlist ------------------------------ */
+  // The DJ's own ordered crate sits one level ABOVE the sources: its entries
+  // carry the performance marks (cue + hot cues), which ride along in
+  // storage and come back onto the deck on load.
+
+  const modeSetlist = h('button', {
+    class: 'mode-btn mode-setlist',
+    title: 'Your set, in order — every entry remembers its cue and hot cues',
+    onclick: () => showSetlist(),
+  }, '★ SETLIST');
+  const modeSources = h('button', {
+    class: 'mode-btn',
+    title: 'Track sources: charts, search, your server, discovery, crate, Nostr',
+    onclick: () => openTab(tab),
+  }, 'SOURCES');
+
+  function syncMode() {
+    modeSetlist.classList.toggle('on', mode === 'setlist');
+    modeSources.classList.toggle('on', mode === 'sources');
+    root.classList.toggle('setlist-mode', mode === 'setlist');
+  }
+
+  function cueSummary(t) {
+    const c = t.cues || {};
+    const hot = (c.hot || []).filter((x) => x != null).length;
+    if (!hot && !c.cue) return 'no marks';
+    const parts = [];
+    if (c.cue) parts.push(`cue ${fmtTime(c.cue)}`);
+    if (hot) parts.push(`${hot} hot`);
+    return parts.join(' · ');
+  }
+
+  function showSetlist() {
+    mode = 'setlist';
+    listEpoch++;
+    heading = `★ ${setlist.name}`;
+    sub = setlist.tracks.length
+      ? `${setlist.tracks.length} tracks — marks ride along, order is your running order`
+      : 'Empty — hit ☆ on any track to put it (and its cues) here.';
+    items = [...setlist.tracks];
+    error = '';
+    busy = false;
+    syncMode();
+    renderSide();
+    renderList();
+  }
 
   /* ----------------------------- discover ----------------------------- */
   // Spontaneous sources by role: Audius (open API, DJ catalog), Jamendo
@@ -242,10 +293,12 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckSt
   }, '📁 LOCAL');
 
   const root = h('div', { class: 'browser' },
+    h('div', { class: 'browser-modes' }, modeSetlist, modeSources),
     h('div', { class: 'browser-tabs' }, ...tabs, h('span', { class: 'tabs-spacer' }), btnLocal, localInput),
     h('div', { class: 'browser-main' }, sideEl,
       h('div', { class: 'browser-results' }, headEl, statusEl, list), railEl),
   );
+  syncMode();
 
   /* ------------------------------ helpers ------------------------------ */
 
@@ -431,6 +484,35 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckSt
     const btnB = toDeck('B');
 
     const marker = h('span', { class: 'row-marker' }, '');
+
+    // ☆ puts the track (with the deck's current marks, if loaded) into the
+    // setlist; ★ takes it out again. In setlist mode the row instead carries
+    // its running-order controls and the stored marks.
+    const inSetlist = mode === 'setlist';
+    const star = h('button', {
+      class: `btn btn-mini row-star ${setlist.has(t.id) ? 'on' : ''}`,
+      title: setlist.has(t.id) ? 'Remove from the setlist' : 'Into the setlist — cue + hot cues ride along',
+      onclick: (e) => {
+        e.stopPropagation();
+        if (setlist.has(t.id)) {
+          setlist.remove(t.id);
+          star.classList.remove('on');
+          star.textContent = '☆';
+          if (inSetlist) showSetlist();
+        } else {
+          setlist.add(t, getDeckCues ? getDeckCues(t.id) : null);
+          star.classList.add('on');
+          star.textContent = '★';
+        }
+      },
+    }, setlist.has(t.id) ? '★' : '☆');
+    const orderActs = inSetlist
+      ? [
+        h('button', { class: 'btn btn-mini', title: 'Earlier in the set', onclick: (e) => { e.stopPropagation(); setlist.move(t.id, -1); showSetlist(); } }, '▲'),
+        h('button', { class: 'btn btn-mini', title: 'Later in the set', onclick: (e) => { e.stopPropagation(); setlist.move(t.id, 1); showSetlist(); } }, '▼'),
+      ]
+      : [];
+
     const row = h('div', { class: 'track-row', ondblclick: () => { onLoadDeck('A', t); maybeAutoPromote(t); } },
       marker,
       h('span', { class: 'row-n' }, String(index + 1)),
@@ -442,13 +524,16 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckSt
         h('div', { class: 'row-artist' }, t.artist),
       ),
       h('div', { class: 'row-stats' },
+        inSetlist ? h('span', { class: 'cue-badge', title: 'Stored performance marks' }, cueSummary(t)) : null,
         keyBpmChip(t),
         h('span', { class: 'row-dur' }, fmtTime(t.duration)),
-        t.sats7d ? h('span', { class: 'row-sats', title: 'Sats over the last 7 days' }, `⚡${fmtSats(t.sats7d)}`) : null,
+        !inSetlist && t.sats7d ? h('span', { class: 'row-sats', title: 'Sats over the last 7 days' }, `⚡${fmtSats(t.sats7d)}`) : null,
       ),
       h('div', { class: 'row-actions' },
-        canPromote(t) ? ingestButton(t) : null,
-        h('button', {
+        ...orderActs,
+        !inSetlist && canPromote(t) ? ingestButton(t) : null,
+        star,
+        inSetlist ? null : h('button', {
           class: 'btn btn-mini btn-addpl',
           title: t.localFile ? 'Local files stay out of the playlist' : 'Add to playlist',
           disabled: Boolean(t.localFile),
@@ -802,8 +887,12 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckSt
   renderSide();
   // Boot load with retries: the catalog occasionally answers slowly enough
   // to time out the resource bridge — an empty first screen must not stick.
+  // Re-check BEFORE each retry too: if anything landed in the list during
+  // the pause (a local import, another tab), the retry must not steal the
+  // view back to charts.
   (async () => {
     for (let attempt = 0; attempt < 3; attempt++) {
+      if (items.length || tab !== 'charts') return;
       await loadCharts(40);
       if (items.length || tab !== 'charts') return;
       await new Promise((r) => setTimeout(r, 4000));

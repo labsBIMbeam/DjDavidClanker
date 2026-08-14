@@ -108,12 +108,21 @@ network access to a host shell.
 - Motion is analytic (velocity and displacement known at every instant), so
   cycles land back on the anchor and nothing drifts; humanize jitter keeps
   repeats from being bit-identical
-- Five quick buttons on each deck plus the full pattern book in a dropdown
+- One dropdown per deck arms a move from the book; one **SCRATCH** button
+  throws it and loops until tapped off (repick mid-scratch to swap live).
+  The top MIDI pad row hits the same button (plus dedicated backspin pads)
 - **✦ PERFORM**: a bar-synced performer rides the running mix — scratch
   bursts, loop rolls, FX bursts, filter sweeps, band isolation, fader chops
   and blends. Each track gets a mood (usually calm; busy/peak only when the
   music steps up), every gesture records its own undo, and anything a human
   touches is released instantly
+
+**Setlist**
+- **★ SETLIST** sits one level above the sources: your own ordered crate
+  for the night. ☆ on any row puts the track there — and its performance
+  marks (cue point + four hot cues) ride along: set a hot cue on a listed
+  track and it is stored; load the track later and the marks come back
+  onto the deck. Reorder with ▲▼, persisted via the storage domain
 
 **Sources**
 - **Wavlake** charts/search/genres (value4value — zap the artist while it

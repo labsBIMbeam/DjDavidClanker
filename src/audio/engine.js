@@ -98,9 +98,9 @@ export class Deck extends Emitter {
     /* loop + sync */
     this.loop = { active: false, start: 0, end: 0, beats: 0 };
     this.syncedTo = null; // other deck while SYNC is latched
-    this._lastPhaseSeek = 0;
     this._taps = []; // tap-tempo ring: { t: wall ms, pos: track seconds }
     this.autoScratch = null; // active auto-scratch pattern name
+    this.scratchChoice = 'baby'; // the move armed in the UI dropdown (survives loads)
     this._autoscratch = null; // AutoScratch instance, created on first use
     this.hotCues = [null, null, null, null]; // also reset per load()
 
@@ -880,32 +880,31 @@ export class Deck extends Emitter {
       this.emit('drop');
     }
 
-    // SYNC latch: a hand permanently on the pitch fader. Small phase errors
-    // are ridden out with micro-nudges; big ones (deck was scratched, or it
-    // just started) get one hard realign, rate-limited so it cannot flutter.
+    // SYNC latch: a hand permanently on the pitch fader. Phase is ALWAYS
+    // caught by bending the rate toward the nearest beat, never by seeking —
+    // a seek is audible as a beat jump (exactly what a DJ complains about)
+    // and it rebuilds the source node. Large errors simply bend harder and
+    // ride in over a few seconds, like a hand on the platter edge.
     const o = this.syncedTo;
-    // The latch stays out while a scheduled start is armed: alignPhase seeks,
-    // and a seek would rebuild the source and destroy the pending start.
+    // The latch stays out while a scheduled start is armed: fighting an
+    // armed sample-accurate start would move the ground under it.
     if (o && !this._drop && this.backend === 'buffer' && this._mode === 'source' && this.playing
       && o.playing && this.bpm && o.effectiveBpm) {
-      const beat = 60 / this.effectiveBpm;
-      const obeat = 60 / o.effectiveBpm;
+      // Phase lives on the TRACK grid: position and beatOffset are track
+      // seconds, so the beat length must be 60/BASE bpm. Using effectiveBpm
+      // here warped the grid by the tempo-fader factor and the latch chased
+      // a drifting target — the old hard-realign seeks were masking that.
+      const beat = 60 / this.bpm;
+      const obeat = 60 / o.bpm;
       const mod = (x, m) => ((x % m) + m) % m;
       let err = mod(this.position - (this.beatOffset || 0), beat) / beat
         - mod(o.position - (o.beatOffset || 0), obeat) / obeat;
       if (err > 0.5) err -= 1;
       if (err < -0.5) err += 1;
-      const nowMs = performance.now();
-      if (Math.abs(err) > 0.1) {
-        // A big jump (seek, scratch landing) gets caught immediately; the
-        // cooldown only guards against flutter around the threshold.
-        const cooldown = Math.abs(err) > 0.25 ? 250 : 900;
-        if (nowMs - this._lastPhaseSeek > cooldown) {
-          this._lastPhaseSeek = nowMs;
-          this.alignPhase(o);
-        }
-      } else if (Math.abs(err) > 0.004) {
-        this.setNudge(clamp(-err * 0.08, -0.008, 0.008));
+      if (Math.abs(err) > 0.004) {
+        // Half a beat at the hardest bend (4 %) rides in over ~6 s @128 BPM.
+        const bend = Math.abs(err) > 0.25 ? 0.04 : Math.abs(err) > 0.1 ? 0.02 : 0.008;
+        this.setNudge(clamp(-err * 0.15, -bend, bend));
       } else if (this.nudgeAmount !== 0) {
         this.setNudge(0);
       }
@@ -978,8 +977,8 @@ export class Deck extends Emitter {
     }
     if (best === null) return false;
     this.setTempo(best);
-
-    if (typeof other === 'object' && other && other.playing && this.playing) this.alignPhase(other);
+    // No phase seek on engage: setSynced() hands the phase to the latch,
+    // which bends it in smoothly. Seeking here was audible as a beat jump.
     return true;
   }
 
@@ -1345,6 +1344,22 @@ export class Mixer extends Emitter {
     this.decks.A = new Deck(this, 'A');
     this.decks.B = new Deck(this, 'B');
     this._lastTick = 0;
+
+    /**
+     * Manual-mix tempo master: 'A' | 'B' | null. While set, SYNC always pulls
+     * the OTHER deck onto this one and refuses to touch the master itself —
+     * the classic mistake of syncing the playing deck onto the silent one
+     * becomes impossible. null = no explicit master (SYNC targets the
+     * counterpart, as before). The automix ignores this: its transitions
+     * always sync the incoming deck onto the outgoing one by construction.
+     */
+    this.syncMaster = null;
+  }
+
+  /** The deck a manual SYNC on `deck` should pull toward. */
+  masterFor(deck) {
+    if (this.syncMaster && this.syncMaster !== deck.id) return this.decks[this.syncMaster];
+    return this.decks[deck.id === 'A' ? 'B' : 'A'];
   }
 
   ensureContext() {

@@ -402,6 +402,38 @@ html, body {
   text-overflow: ellipsis; max-width: 220px;
 }
 
+/* Setlist mode: the DJ's own crate one level above the sources. */
+.browser-modes {
+  display: flex; gap: 8px; align-items: center;
+  padding: 6px 10px 0;
+}
+.mode-btn {
+  background: none; border: 1px solid var(--line); border-radius: 4px 4px 0 0;
+  color: var(--muted); font-family: var(--display); font-size: 12px;
+  letter-spacing: .14em; padding: 5px 14px; cursor: pointer;
+}
+.mode-btn.on { color: #f7931a; border-color: #f7931a; }
+.mode-btn.mode-setlist.on { color: #ff6a00; border-color: #ff6a00; box-shadow: 0 0 8px rgba(255, 106, 0, 0.3); }
+.browser.setlist-mode .browser-tabs { display: none; }
+.browser.setlist-mode .browser-side { display: none; }
+.browser.setlist-mode .browser-main { grid-template-columns: 1fr 280px; }
+.row-star.on { color: #ff6a00; border-color: #ff6a00; }
+.cue-badge {
+  font-family: var(--mono); font-size: 10px; color: #ffa733;
+  border: 1px solid #4a3213; border-radius: 3px; padding: 1px 5px;
+  white-space: nowrap;
+}
+
+/* Tempo master: the MST button in the cluster plus the lane badge. */
+.btn-master.on { color: #ff6a00; border-color: #ff6a00; box-shadow: 0 0 8px rgba(255, 106, 0, 0.4); }
+.lane-mst {
+  display: none;
+  font-family: var(--mono); font-size: 9px; letter-spacing: .12em;
+  color: #ff6a00; border: 1px solid #ff6a00; border-radius: 3px;
+  padding: 0 4px;
+}
+.lane-mst.show { display: inline-block; }
+
 /* Booth-readable performance readouts: filter + macro side by side in the
    cluster, driven by the MIDI knobs. Overrides the small legacy .flt-* rules
    by specificity, not position. */
@@ -425,13 +457,17 @@ html, body {
 .perf-scopes .mcr-scope.hot .flt-fill { background: #ff6a00; box-shadow: 0 0 10px rgba(255, 106, 0, 0.55); }
 .perf-scopes .mcr-scope.hot .flt-text { color: #ff8a3c; }
 
-/* The scratch book: full pattern library behind the quick buttons. */
+/* The scratch book: dropdown arms a move, one GO button throws it. */
 .scratch-sel {
   background: #171310; color: var(--text); border: 1px solid var(--line);
-  border-radius: 3px; font-family: var(--mono); font-size: 10px;
-  padding: 2px 4px; max-width: 110px;
+  border-radius: 3px; font-family: var(--mono); font-size: 11px;
+  padding: 3px 4px; max-width: 118px;
 }
-.btn-scratch.on { color: #ff6a00; border-color: #ff6a00; }
+.btn-scratch-go { letter-spacing: .1em; }
+.btn-scratch.on {
+  color: #ff6a00; border-color: #ff6a00;
+  box-shadow: 0 0 8px rgba(255, 106, 0, 0.4);
+}
 
 .upnext {
   border-left: 1px solid var(--line); padding: 10px;
