@@ -55,7 +55,13 @@ network access to a host shell.
 - 3-band EQ with kill, bipolar filter sweep (LP ↔ HP), trim with auto-gain
 - Channel fader plus VU meter per deck
 
-**FX per deck** (insert after the filter)
+**FX per deck** (insert after the filter) — **15 units** in a fixed rack:
+flanger, phaser, chorus, gater, tremolo, autopan, drive, bitcrush, echo,
+ping-pong delay (both tempo-synced), reverb, and the special filters —
+telephone, auto-wah, vowel/formant morph (A–U), comb. Two switchable slots
+pick which units the buttons drive; on the MPD218 it is one hand per slot:
+K3/K4 turn slot 1 (the unit's primary amount — zero releases it), the FX2
+pads toggle slot 2.
 - **5 effects in 2 switchable slots**: flanger, phaser, gater, echo, reverb.
   A dropdown per slot picks which effect the button (or F/G/H/J) toggles;
   picking an effect already in the other slot swaps the slots.

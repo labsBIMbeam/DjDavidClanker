@@ -325,7 +325,11 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
       fader({ ...opts, orient: 'h', className: 'fx' }),
     );
 
-  const FX_LABELS = { flanger: 'FLANGER', phaser: 'PHASER', gater: 'GATER', echo: 'ECHO', reverb: 'REVERB' };
+  const FX_LABELS = {
+    flanger: 'FLANGER', phaser: 'PHASER', gater: 'GATER', echo: 'ECHO', reverb: 'REVERB',
+    chorus: 'CHORUS', tremolo: 'TREMOLO', autopan: 'AUTOPAN', drive: 'DRIVE', crush: 'CRUSH',
+    pingpong: 'PINGPONG', telephone: 'TELEPHONE', autowah: 'AUTOWAH', vowel: 'VOWEL', comb: 'COMB',
+  };
   const ECHO_DIVISIONS = [
     ['1/16', 0.25],
     ['1/8', 0.5],
@@ -400,6 +404,97 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
           fxKnob('Mix', { min: 0, max: 1, step: 0.01, value: p.mix, label: 'Echo Mix', onInput: (v) => set({ mix: v }) }),
         ),
         sync: div.sync,
+      };
+    }
+    if (type === 'chorus') {
+      return {
+        el: h('div', { class: 'fx-body' },
+          fxKnob('Rate', { min: 0.05, max: 4, step: 0.01, value: p.rate, label: 'Chorus Rate', onInput: (v) => set({ rate: v }) }),
+          fxKnob('Depth', { min: 0, max: 0.008, step: 0.0001, value: p.depth, label: 'Chorus Depth', onInput: (v) => set({ depth: v }) }),
+          fxKnob('Mix', { min: 0, max: 1, step: 0.01, value: p.mix, label: 'Chorus Mix', onInput: (v) => set({ mix: v }) }),
+        ),
+        sync: () => {},
+      };
+    }
+    if (type === 'tremolo' || type === 'autopan') {
+      const second = type === 'tremolo'
+        ? fxKnob('Depth', { min: 0, max: 1, step: 0.01, value: p.depth, label: 'Tremolo Depth', onInput: (v) => set({ depth: v }) })
+        : fxKnob('Width', { min: 0, max: 1, step: 0.01, value: p.width, label: 'Autopan Width', onInput: (v) => set({ width: v }) });
+      return {
+        el: h('div', { class: 'fx-body' },
+          fxKnob('Rate', { min: 0.05, max: type === 'tremolo' ? 16 : 8, step: 0.01, value: p.rate, label: `${type} Rate`, onInput: (v) => set({ rate: v }) }),
+          second,
+        ),
+        sync: () => {},
+      };
+    }
+    if (type === 'drive') {
+      return {
+        el: h('div', { class: 'fx-body' },
+          fxKnob('Drive', { min: 0, max: 1, step: 0.01, value: p.drive, label: 'Drive Amount', onInput: (v) => set({ drive: v }) }),
+          fxKnob('Tone', { min: 1200, max: 16000, step: 100, value: p.tone, label: 'Drive Tone', onInput: (v) => set({ tone: v }) }),
+          fxKnob('Mix', { min: 0, max: 1, step: 0.01, value: p.mix, label: 'Drive Mix', onInput: (v) => set({ mix: v }) }),
+        ),
+        sync: () => {},
+      };
+    }
+    if (type === 'crush') {
+      return {
+        el: h('div', { class: 'fx-body' },
+          fxKnob('Bits', { min: 2, max: 12, step: 1, value: p.bits, label: 'Crush Bits', onInput: (v) => set({ bits: v }) }),
+          fxKnob('Mix', { min: 0, max: 1, step: 0.01, value: p.mix, label: 'Crush Mix', onInput: (v) => set({ mix: v }) }),
+        ),
+        sync: () => {},
+      };
+    }
+    if (type === 'pingpong') {
+      const div = divRow(ECHO_DIVISIONS, () => deck.fx.pingpong.division, (v) => set({ division: v }));
+      return {
+        el: h('div', { class: 'fx-body' },
+          div.el,
+          fxKnob('Fdbk', { min: 0, max: 0.9, step: 0.01, value: p.feedback, label: 'PingPong Feedback', onInput: (v) => set({ feedback: v }) }),
+          fxKnob('Mix', { min: 0, max: 1, step: 0.01, value: p.mix, label: 'PingPong Mix', onInput: (v) => set({ mix: v }) }),
+        ),
+        sync: div.sync,
+      };
+    }
+    if (type === 'telephone') {
+      return {
+        el: h('div', { class: 'fx-body' },
+          fxKnob('Width', { min: 0, max: 1, step: 0.01, value: p.width, label: 'Telephone Width', onInput: (v) => set({ width: v }) }),
+        ),
+        sync: () => {},
+      };
+    }
+    if (type === 'autowah') {
+      return {
+        el: h('div', { class: 'fx-body' },
+          fxKnob('Rate', { min: 0.05, max: 8, step: 0.01, value: p.rate, label: 'AutoWah Rate', onInput: (v) => set({ rate: v }) }),
+          fxKnob('Res', { min: 1, max: 18, step: 0.5, value: p.res, label: 'AutoWah Resonance', onInput: (v) => set({ res: v }) }),
+          fxKnob('Range', { min: 0, max: 1, step: 0.01, value: p.range, label: 'AutoWah Range', onInput: (v) => set({ range: v }) }),
+          fxKnob('Mix', { min: 0, max: 1, step: 0.01, value: p.mix, label: 'AutoWah Mix', onInput: (v) => set({ mix: v }) }),
+        ),
+        sync: () => {},
+      };
+    }
+    if (type === 'vowel') {
+      return {
+        el: h('div', { class: 'fx-body' },
+          fxKnob('A–U', { min: 0, max: 1, step: 0.01, value: p.vowel, label: 'Vowel Morph', onInput: (v) => set({ vowel: v }) }),
+          fxKnob('Res', { min: 2, max: 16, step: 0.5, value: p.res, label: 'Vowel Resonance', onInput: (v) => set({ res: v }) }),
+          fxKnob('Mix', { min: 0, max: 1, step: 0.01, value: p.mix, label: 'Vowel Mix', onInput: (v) => set({ mix: v }) }),
+        ),
+        sync: () => {},
+      };
+    }
+    if (type === 'comb') {
+      return {
+        el: h('div', { class: 'fx-body' },
+          fxKnob('Freq', { min: 40, max: 1500, step: 5, value: p.freq, label: 'Comb Frequency', onInput: (v) => set({ freq: v }) }),
+          fxKnob('Fdbk', { min: 0, max: 0.95, step: 0.01, value: p.feedback, label: 'Comb Feedback', onInput: (v) => set({ feedback: v }) }),
+          fxKnob('Mix', { min: 0, max: 1, step: 0.01, value: p.mix, label: 'Comb Mix', onInput: (v) => set({ mix: v }) }),
+        ),
+        sync: () => {},
       };
     }
     return {

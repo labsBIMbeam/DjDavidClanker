@@ -282,7 +282,13 @@ try {
     dj.midi.handle([0xb0, 15, 127]); // K6 → cue volume 1
     const cue = dj.mixer.cueVolume;
     dj.midi.handle([0xb0, 3, 0]); // K1 hard left → deck A lowpass
-    dj.midi.handle([0xb0, 12, 110]); // K3 right → deck A macro (dub echo over HP)
+    // K3 now drives FX slot 1 (default flanger): on + primary amount.
+    dj.midi.handle([0xb0, 12, 110]);
+    const slot1On = dj.decks.A.fx.flanger.on && Math.abs(dj.decks.A.fx.flanger.mix - 110 / 127) < 0.03;
+    dj.midi.handle([0xb0, 12, 0]);
+    const slot1Off = dj.decks.A.fx.flanger.on === false;
+    // The macro/echo readout follows engine truth (set directly here).
+    dj.decks.A.setMacroValue(0.73);
     const filt = dj.decks.A.filter;
     const fltUi = document.querySelector('.deck-top.deck-A .flt-scope:not(.mcr-scope) .flt-text');
     const mcrUi = document.querySelector('.deck-top.deck-A .mcr-text');
@@ -290,27 +296,31 @@ try {
     const fltLabel = fltUi ? fltUi.textContent : '';
     const mcrLabel = mcrUi ? mcrUi.textContent : '';
     dj.midi.handle([0xb0, 3, 64]); // filter back to neutral-ish
-    dj.midi.handle([0xb0, 12, 64]); // macro back to detent
-    dj.midi.handle([0x90, 45, 100]); // pad 10 down: A FX slot 1 punch in
-    const fxDown = dj.decks.A.fx[dj.decks.A.fxSlots[0]].on;
-    dj.midi.handle([0x80, 45, 0]); // pad 10 up: punch out
-    const fxUp = dj.decks.A.fx[dj.decks.A.fxSlots[0]].on;
+    dj.decks.A.setMacroValue(0);
+    // FX2 pad toggles slot 2 (default gater) — one hand per slot.
+    dj.midi.handle([0x90, 45, 100]);
+    const fx2On = dj.decks.A.fx.gater.on === true;
+    dj.midi.handle([0x90, 45, 100]);
+    const fx2Off = dj.decks.A.fx.gater.on === false;
     // Top pad row: pad 13 throws whatever move the dropdown armed.
     dj.decks.A.scratchChoice = 'flare2';
     dj.midi.handle([0x90, 48, 100]);
     const scratchOn = dj.decks.A.autoScratching && dj.decks.A.autoScratch === 'flare2';
     dj.midi.handle([0x90, 48, 100]);
     const scratchOff = !dj.decks.A.autoScratching;
-    return { played, xfRight, cue, filt, fltLabel, mcrLabel, fxDown, fxUp, scratchOn, scratchOff };
+    return { played, xfRight, cue, filt, fltLabel, mcrLabel, slot1On, slot1Off, fx2On, fx2Off, scratchOn, scratchOff };
   });
   check('MIDI: pad 1 toggles deck A transport', midi.played === true);
   check('MIDI: K5/K6 drive crossfader and cue volume', midi.xfRight === 1 && midi.cue === 1,
     `xf=${midi.xfRight} cue=${midi.cue}`);
   check('MIDI: K1 drives the filter and the readout shows it',
     midi.filt === -1 && midi.fltLabel.startsWith('LP'), `${midi.filt} · "${midi.fltLabel}"`);
-  check('MIDI: K3 drives the macro and the echo readout shows it',
+  check('MIDI: K3 drives slot-1 FX (on + amount, zero releases)',
+    midi.slot1On === true && midi.slot1Off === true, `on=${midi.slot1On} off=${midi.slot1Off}`);
+  check('MIDI: the macro/echo readout mirrors engine truth',
     midi.mcrLabel.startsWith('HP DUB ECHO'), `"${midi.mcrLabel}"`);
-  check('MIDI: FX pad is momentary (hold to ride)', midi.fxDown === true && midi.fxUp === false);
+  check('MIDI: FX2 pad toggles slot 2', midi.fx2On === true && midi.fx2Off === true,
+    `on=${midi.fx2On} off=${midi.fx2Off}`);
   check('MIDI: top pad throws the armed scratch move and toggles off',
     midi.scratchOn === true && midi.scratchOff === true,
     `on=${midi.scratchOn} off=${midi.scratchOff}`);

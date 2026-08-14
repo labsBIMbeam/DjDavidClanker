@@ -28,11 +28,29 @@ import { detectBpm, waveformPeaks, rms, analyzeStructure, detectKey, keyObject }
 import { trackCacheId, getAnalysis, putAnalysis } from '../lib/analysiscache.js';
 import { Turntable, reversedBuffer } from './scratch.js';
 import { AutoScratch } from './autoscratch.js';
-import { Flanger, Gater, Phaser, Echo, Reverb, ChannelFilter } from './fx.js';
+import {
+  Flanger, Gater, Phaser, Echo, Reverb, ChannelFilter,
+  Chorus, Tremolo, AutoPan, Drive, Crush, PingPong, Telephone, AutoWah, Vowel, Comb,
+} from './fx.js';
 import { MacroFX, MACRO_TYPES } from './macrofx.js';
 
 /** Insert order in the chain — modulation first, gate, then time-based tails. */
-export const FX_TYPES = ['flanger', 'phaser', 'gater', 'echo', 'reverb'];
+export const FX_TYPES = [
+  'flanger', 'phaser', 'chorus', 'gater', 'tremolo', 'autopan',
+  'drive', 'crush', 'echo', 'pingpong', 'reverb',
+  'telephone', 'autowah', 'vowel', 'comb',
+];
+
+/**
+ * Each unit's "one knob": what a single MIDI pot should drive when the unit
+ * sits in FX slot 1. Everything else stays at its panel value.
+ */
+export const FX_PRIMARY = {
+  flanger: 'mix', phaser: 'mix', chorus: 'mix', gater: 'depth',
+  tremolo: 'depth', autopan: 'width', drive: 'drive', crush: 'mix',
+  echo: 'mix', pingpong: 'mix', reverb: 'mix', telephone: 'width',
+  autowah: 'mix', vowel: 'vowel', comb: 'mix',
+};
 export { FILTER_MODELS } from './fx.js';
 export { MACRO_TYPES, MACRO_LABELS } from './macrofx.js';
 
@@ -119,6 +137,16 @@ export class Deck extends Emitter {
       gater: { on: false, division: 0.5, duty: 0.5, depth: 1, smooth: 0.25 },
       echo: { on: false, division: 0.5, feedback: 0.45, mix: 0.5 },
       reverb: { on: false, decay: 1.6, tone: 5000, mix: 0.35 },
+      chorus: { on: false, rate: 0.6, depth: 0.004, mix: 0.5 },
+      tremolo: { on: false, rate: 5, depth: 0.7 },
+      autopan: { on: false, rate: 1, width: 0.8 },
+      drive: { on: false, drive: 0.5, tone: 6500, mix: 0.8 },
+      crush: { on: false, bits: 6, mix: 0.8 },
+      pingpong: { on: false, division: 0.75, feedback: 0.45, mix: 0.4 },
+      telephone: { on: false, width: 0.5 },
+      autowah: { on: false, rate: 1.2, res: 8, range: 0.6, mix: 0.85 },
+      vowel: { on: false, vowel: 0, res: 9, mix: 0.9 },
+      comb: { on: false, freq: 220, feedback: 0.8, mix: 0.5 },
     };
     /** Which two units the deck's FX buttons drive. The chain holds all five. */
     this.fxSlots = ['flanger', 'gater'];
@@ -176,12 +204,36 @@ export class Deck extends Emitter {
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 1024;
 
+    // The full insert rack, fixed order: tone-shapers first (drive/crush/
+    // character filters), then modulation, then rhythmic gates, then the
+    // time-based tails. Bypassed units are a couple of idle gain hops.
+    const chorus = new Chorus(ctx);
+    const tremolo = new Tremolo(ctx);
+    const autopan = new AutoPan(ctx);
+    const drive = new Drive(ctx);
+    const crush = new Crush(ctx);
+    const pingpong = new PingPong(ctx);
+    const telephone = new Telephone(ctx);
+    const autowah = new AutoWah(ctx);
+    const vowel = new Vowel(ctx);
+    const comb = new Comb(ctx);
+
     trim.connect(low).connect(mid).connect(high).connect(filter.input);
-    filter.output.connect(flanger.input);
+    filter.output.connect(drive.input);
+    drive.output.connect(crush.input);
+    crush.output.connect(telephone.input);
+    telephone.output.connect(autowah.input);
+    autowah.output.connect(vowel.input);
+    vowel.output.connect(comb.input);
+    comb.output.connect(flanger.input);
     flanger.output.connect(phaser.input);
-    phaser.output.connect(gater.input);
-    gater.output.connect(echo.input);
-    echo.output.connect(reverb.input);
+    phaser.output.connect(chorus.input);
+    chorus.output.connect(gater.input);
+    gater.output.connect(tremolo.input);
+    tremolo.output.connect(autopan.input);
+    autopan.output.connect(echo.input);
+    echo.output.connect(pingpong.input);
+    pingpong.output.connect(reverb.input);
     reverb.output.connect(macro.input);
     // scratchGate: the autoscratch's battle fader. It sits where a mixer's
     // cut-in fader would, but per deck, so scratch cuts never fight the real
@@ -202,7 +254,11 @@ export class Deck extends Emitter {
     macro.setType(this.macro.type);
     macro.setValue(this.macro.value);
 
-    this._graph = { trim, low, mid, high, filter, flanger, phaser, gater, echo, reverb, macro, gain, scratchGate, analyser, cueSend };
+    this._graph = {
+      trim, low, mid, high, filter, flanger, phaser, gater, echo, reverb,
+      chorus, tremolo, autopan, drive, crush, pingpong, telephone, autowah, vowel, comb,
+      macro, gain, scratchGate, analyser, cueSend,
+    };
     this._analyseBuf = new Float32Array(analyser.fftSize);
     this._turntable = new Turntable(ctx, trim);
     this._applyMix();
@@ -915,6 +971,7 @@ export class Deck extends Emitter {
       this._graph.gater.set({ bpm });
       this._graph.gater.tick();
       this._graph.echo.set({ bpm });
+      this._graph.pingpong.set({ bpm });
       this._graph.macro.tick(bpm);
     }
   }
