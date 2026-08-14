@@ -75,6 +75,12 @@ network access to a host shell.
   bending the pitch: a granular worklet corrects it back live
 - **Quantized DROP**: starts the deck sample-accurately on the other deck's
   next bar-1
+- **Queue you can trust**: the UP NEXT rail names the real count, `≡` opens
+  the whole queue, ✕ drops and ⤒ pins a track right behind the playhead —
+  from the queue or from any browser row. With SHUF/SMART the engine
+  resolves its next three picks in advance, so what the rail shows is what
+  will play. **WAVLAKE PICKS** suggests chart tracks matched to the running
+  deck (key/BPM scoring) — one tap into the queue, zappable by the crowd
 - 3-band EQ with kill, bipolar filter sweep (LP ↔ HP), trim with auto-gain
 - Channel fader plus VU meter per deck
 

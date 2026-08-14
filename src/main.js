@@ -306,10 +306,26 @@ const browser = Browser({
       audible: mixer.decks.B.playing && mixer.crossValue('B') > 0.12,
       playing: mixer.decks.B.playing,
     },
-    queue: automix.queue.slice(automix.cursor, automix.cursor + 40),
+    queue: automix.queue.slice(automix.cursor, automix.cursor + 200),
+    queueTotal: Math.max(0, automix.queue.length - automix.cursor),
+    order: automix.order,
     playedIds: automix.history.slice(-40).map((t) => t.id),
+    liveSummary: (() => {
+      const d = automix.liveId ? mixer.decks[automix.liveId]
+        : (mixer.decks.A.playing ? mixer.decks.A : (mixer.decks.B.playing ? mixer.decks.B : null));
+      if (!d || !d.bpm) return null;
+      return {
+        bpm: d.bpm,
+        camelot: d.musicalKey ? d.musicalKey.camelot : '',
+        energyOut: d.structure && d.structure.ok ? d.structure.energyOut : NaN,
+      };
+    })(),
   }),
   onQueueFromBrowser: () => automix.setQueue(browser.currentItems()),
+  queueOps: {
+    promote: (track) => automix.promote(track),
+    remove: (id) => automix.removeFromQueue(id),
+  },
 });
 
 const automix = new Automix(mixer, {

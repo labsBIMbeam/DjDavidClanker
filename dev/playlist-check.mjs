@@ -165,6 +165,78 @@ const dl = await dlPromise;
 check('setlist ⤓ save downloads setlist.json', dl.suggestedFilename() === 'setlist.json',
   dl.suggestedFilename());
 
+/* --------------------------- queue interface --------------------------- */
+
+// The rail must tell the truth about the WHOLE queue: real count in the
+// header, a full expandable view, drop + promote as pure array surgery,
+// and a materialized front under shuffle so the display IS the plan.
+const q1 = await frame.evaluate(() => {
+  const dj = window.__djclanker;
+  const mk = (i) => ({ id: 'qi-' + i, title: 'QI ' + i, artist: 'Suite', duration: 200, streamUrls: [], source: 'server' });
+  dj.automix.order = 'list';
+  dj.automix.setQueue([1, 2, 3, 4, 5, 6, 7, 8].map(mk));
+  dj.automix.tick(0.016);
+  dj.browser.tick();
+  const head = document.querySelector('.upnext-head');
+  return { header: head ? head.textContent : '' };
+});
+check('queue rail shows the real count', q1.header.includes('8 in queue'), q1.header.trim());
+
+const q2 = await frame.evaluate(() => {
+  const dj = window.__djclanker;
+  document.querySelector('.upnext-toggle').click();
+  dj.browser.tick();
+  const rows = document.querySelectorAll('.qfull-row').length;
+  document.querySelectorAll('.qfull-row')[1].querySelector('.btn-qdrop').click();
+  dj.browser.tick();
+  return {
+    rows,
+    afterDrop: document.querySelectorAll('.qfull-row').length,
+    gone: !dj.automix.queue.some((t) => t.id === 'qi-2'),
+    playingUntouched: !dj.decks.A.playing || dj.decks.A.playing, // never throws — audio state read only
+  };
+});
+check('full queue view opens and drops entries silently', q2.rows === 8 && q2.afterDrop === 7 && q2.gone,
+  `rows ${q2.rows} → ${q2.afterDrop}`);
+
+const q3 = await frame.evaluate(() => {
+  const dj = window.__djclanker;
+  const rows = [...document.querySelectorAll('.qfull-row')];
+  const title = rows[3].querySelector('.qfull-title').textContent;
+  rows[3].querySelector('button[title="Play next"]').click();
+  dj.browser.tick();
+  return { title, first: dj.automix.queue[dj.automix.cursor].title };
+});
+check('promote pins a track right behind the playhead', q3.first === q3.title, `${q3.title} → Q1`);
+
+const q4 = await frame.evaluate(() => {
+  const dj = window.__djclanker;
+  dj.automix.order = 'shuffle';
+  dj.automix.tick(0.016);
+  const f1 = dj.automix.queue.slice(dj.automix.cursor, dj.automix.cursor + 3).map((t) => t.id);
+  dj.automix.tick(0.016);
+  dj.automix.tick(0.016);
+  const f2 = dj.automix.queue.slice(dj.automix.cursor, dj.automix.cursor + 3).map((t) => t.id);
+  const took = dj.automix._takeNext();
+  return { stable: f1.join() === f2.join(), consumedHead: took && took.id === f1[0] };
+});
+check('shuffle front is materialized: display IS the plan', q4.stable && q4.consumedHead,
+  `stable=${q4.stable} head-consumed=${q4.consumedHead}`);
+
+const q5 = await frame.evaluate(async () => {
+  const dj = window.__djclanker;
+  for (let i = 0; i < 30 && !document.querySelector('.suggest-card'); i++) {
+    dj.browser.tick();
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  return {
+    cards: document.querySelectorAll('.suggest-card').length,
+    rowBtns: document.querySelectorAll('.btn-qnext').length,
+  };
+});
+check('wavlake picks suggest chart tracks beside the queue', q5.cards === 3 && q5.rowBtns > 0,
+  `cards=${q5.cards} row-promotes=${q5.rowBtns}`);
+
 await page.screenshot({ path: `${OUT}-crate.png`, fullPage: true });
 await browser.close();
 
