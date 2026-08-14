@@ -49,6 +49,9 @@ network access to a host shell.
 - **● REC**: record the master bus; stopping downloads the whole set as a
   webm/opus file. **⚡ SHOW**: one button arms the full autopilot — queue,
   automix with SMART order, performer riding on top
+- **⛶ STAGE + visualizer**: the beamer face runs a ZapViz-style feedback
+  visualizer behind the decks — auto-drifting trails, noise sparkles and
+  five audio-reactive presets rotating on their own, Winamp automode style
 - **Beat loops**: IN/OUT for manual loops, 1/2/4/8 snap onto the detected
   grid, EXIT leaves
 - **Tempo fader** ±8 / ±16 / ±50 %, BPM detection with beat phase and 4/4

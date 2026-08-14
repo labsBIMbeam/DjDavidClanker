@@ -397,6 +397,13 @@ html, body {
 /* ------------------------------ stage view ------------------------------
    The beamer face: waves and decks only, native-tall lanes, no browser.
    Toggled by the ⛶ STAGE button (body.stage-view). */
+/* ZapViz-style visualizer behind everything: pointer-blind, stage-only. */
+.vis-canvas {
+  position: fixed; inset: 0; display: none; pointer-events: none;
+  z-index: 0; opacity: 0.55;
+}
+.vis-canvas.show { display: block; }
+.app { position: relative; z-index: 1; }
 .btn-stage.on { color: #ff6a00; border-color: #ff6a00; }
 .stage-view .browser { display: none; }
 .stage-view .app { max-width: none; padding: 10px 24px 24px; }

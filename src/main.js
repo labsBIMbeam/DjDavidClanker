@@ -10,6 +10,7 @@ import { Browser } from './ui/browser.js';
 import { openModal, toast } from './ui/modal.js';
 import { openZapDialog } from './ui/zapmodal.js';
 import { h, clear, scrambleTo } from './ui/dom.js';
+import { Visualizer } from './ui/visualizer.js';
 import { capabilities, store, getPublicKey, onIdentityChanged, inShell, mediaSession } from './lib/nap.js';
 import { publishSetlist } from './lib/nostr.js';
 import { hexToNpub } from './lib/bech32.js';
@@ -81,18 +82,20 @@ const btnRec = h('button', {
 
 // Stage view for the beamer: waves + platter clusters only, everything
 // booth-only (browser, settings noise) tucked away. `?stage=1` boots into it.
+// The ZapViz-style visualizer runs behind it — automode only, like Winamp.
+const vis = Visualizer(mixer);
+document.body.appendChild(vis.canvas);
+const applyStage = (on) => {
+  document.body.classList.toggle('stage-view', on);
+  btnStage.classList.toggle('on', on);
+  vis.setActive(on);
+};
 const btnStage = h('button', {
   class: 'btn btn-mini btn-stage',
-  title: 'Stage view for the second screen: waves and decks only — the crowd does not need the browser',
-  onclick: () => {
-    document.body.classList.toggle('stage-view');
-    btnStage.classList.toggle('on', document.body.classList.contains('stage-view'));
-  },
+  title: 'Stage view for the second screen: waves, decks and the visualizer — the crowd does not need the browser',
+  onclick: () => applyStage(!document.body.classList.contains('stage-view')),
 }, '⛶ STAGE');
-if (new URLSearchParams(location.search).has('stage')) {
-  document.body.classList.add('stage-view');
-  btnStage.classList.add('on');
-}
+if (new URLSearchParams(location.search).has('stage')) applyStage(true);
 
 const header = h('header', { class: 'app-head' },
   h('div', { class: 'brand' },
@@ -163,6 +166,7 @@ function audibleDecks() {
 }
 
 let lastBeatIdx = -1;
+let wasMixing = false;
 
 function tickWavedeck() {
   const audible = audibleDecks();
@@ -197,8 +201,12 @@ function tickWavedeck() {
   }
   lastBeatIdx = beatIdx;
 
-  // Data-storm shimmer while a handover runs.
-  deckWrap.classList.toggle('mixing', Boolean(automix.transition || automix.fade));
+  // Data-storm shimmer while a handover runs — and a fresh visualizer
+  // preset with every scene change, Winamp-style.
+  const mixingNow = Boolean(automix.transition || automix.fade);
+  if (mixingNow && !wasMixing) vis.onTransition();
+  wasMixing = mixingNow;
+  deckWrap.classList.toggle('mixing', mixingNow);
 
   const latched = mixer.decks.A.syncedTo || mixer.decks.B.syncedTo;
   syncChip.classList.toggle('latched', Boolean(latched));
@@ -763,7 +771,7 @@ midi.connect()
 // drivable: dev/live-dj.mjs runs a whole set through this handle.
 window.__djclanker = {
   mixer, decks: mixer.decks, settings, automix, browser, toast, planTransition,
-  preanalyzer, midi, performer, setlist: savedSet, localSongs,
+  preanalyzer, midi, performer, setlist: savedSet, localSongs, vis,
   selection: { camelotScore, bpmFoldScore, energyScore, scoreCandidate, summaryFor },
   analysisCache: { trackCacheId, getAnalysis },
 };
@@ -784,6 +792,7 @@ function frame(now) {
   strip.tick();
   automixBar.tick();
   tickWavedeck();
+  vis.tick(now);
   if (now - lastBrowserTick > 500) {
     lastBrowserTick = now;
     browser.tick(); // track markers + the UP NEXT rail, 2 Hz is plenty
