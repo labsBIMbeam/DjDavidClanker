@@ -1,6 +1,6 @@
 # Handoff — DJ David Clanker
 
-As of: August 13, 2026 · Status: **working, 197 E2E checks across 9 suites + 9 pytest green**
+As of: August 14, 2026 · Status: **working, 226 E2E checks across 9 suites + 9 pytest green**
 
 This document is for the person who touches the project next — whether that's
 you in three months or someone else. It describes what is built, **why it is
@@ -185,14 +185,14 @@ two cases apart.
 ## 4. What is verified
 
 `node dev/smoke.mjs` drives the real app in the real sandboxed iframe against
-the real Wavlake API. No mocks except the Nostr fixture. Last run: **40/40**,
-plus the sibling suites `fx-sync-check` (48), `automix-check` (5),
-`macro-check` (24), `autodj-check` (37), `sources-check` (11, self-contained:
+the real Wavlake API. No mocks except the Nostr fixture. Last run: **43/43**,
+plus the sibling suites `fx-sync-check` (54), `automix-check` (7),
+`macro-check` (24), `autodj-check` (54), `sources-check` (21, self-contained:
 it spawns its own mock Subsonic+ingest server and its own shell on :5177;
 the Audius and Archive.org checks run against the REAL APIs, same policy as
-the Wavlake suites), `playlist-check` (9) and `local-check` (7) — 181 JS
-checks, plus `uv run pytest` in `ingest/` (9, including a real ffmpeg
-loudnorm run).
+the Wavlake suites), `playlist-check` (14), `local-check` (9) and the
+`zaza-check` visual probe — 226 JS checks, plus `uv run pytest` in
+`ingest/` (9, including a real ffmpeg loudnorm run).
 
 **Media pipeline** (gates 1–3): the **Server tab** speaks the Subsonic API
 to a self-hosted Navidrome — the single source of truth for play-ready
@@ -434,6 +434,16 @@ node dev/smoke.mjs # E2E, screenshots to /tmp/clanker-*.png
 reach hosts that send no CORS headers — a pure browser shell can't do that.
 Allowed hosts live in `dev/serve-shell.mjs` (`ALLOW_HOSTS`).
 
+**NIP-07 in the dev shell**: the shell page has a real origin, so a signer
+extension (Alby, nos2x) injects `window.nostr` THERE — which is exactly
+where a NIP-5D host holds keys. ⚡ NIP-07 in the top bar signs in
+(identity.changed flows to the napplet); from then on every
+`outbox/relay.publish` is signed by the extension and pushed to real relays
+(damus / nos.lol / primal, 3.5 s OK-wait each; `?norelay=1` skips the
+network for tests). The napplet never sees a key. Demo closer: play the
+set, hit "publish setlist" in the Nostr section — it goes out as a real
+kind-30003 under YOUR npub.
+
 Two dev-shell lessons that cost a day of green-suite archaeology:
 
 - **The proxy keeps a disk cache** (`dev/.proxy-cache/`, gitignored):
@@ -596,13 +606,17 @@ Interactions with non-obvious behavior:
 | Platter | angle-based, not x-based: one revolution = 1.8 s of audio, no matter where you grab |
 | CUE | stopped: set the point. Playing: jump back and pause |
 | REW | hold. Target speed grows with hold time up to −14× |
-| SYNC | **latch**: engaging matches BPM (incl. half/double and 2:3 levels) and then holds the phase permanently — micro-nudge for small errors, hard realign for large ones. A second click releases |
+| SYNC | **latch**: engaging matches BPM (incl. half/double and 2:3 levels) onto the tempo master (MST — or the opposite deck when none is set) and then holds the phase permanently by **bending the rate only** (staged 0.8/2/4 % toward the nearest beat; half a beat rides in over ~6 s). It NEVER seeks — seeking is audible as a beat jump, and the old hard realigns were also masking a grid bug (phase must be computed on the track grid, 60/BASE bpm, not 60/effective). A second click releases |
+| KEY (keylock, pitch box) | tempo keeps driving playbackRate (vinyl), the `clanker-keylock` worklet (`src/audio/keylock.js`, inline source via Blob URL — single-file safe) corrects pitch by 1/currentRate every tickAudio, sync-latch bend included. Dual-tap granular shifter, ~93 ms grain, cos² crossfade; ratio 1 short-circuits to a copy. Source path only — platter/scratch stays vinyl. `mixer.keylockReady` gates the button where worklets are unavailable |
+| MST (tempo master) | marks this deck as the manual tempo master: SYNC always pulls the OTHER deck onto it and refuses on the master itself — syncing the live deck onto the silent one by habit becomes impossible. Lane badge + lit button show who leads; toggle off to return to opposite-deck syncing. The automix ignores it (its transitions sync incoming onto outgoing by construction) |
 | LOOP bar | IN/OUT for manual loops, 1/2/4/8 snap onto the beat grid, EXIT leaves. An active loop holds off the Automix transition |
 | 📁 LOCAL / drag & drop | local audio files into the list or straight onto a deck — always FULL mode, no zap target, not in the persistent playlist |
 | BPM display | large = effective (base × tempo fader), small editable = BASE |
-| FX slot dropdown | picks which of the 5 effects the button (or F/G/H/J) toggles; picking the other slot's effect swaps the slots |
+| Transition style button | cycles AUTO → BLEND → CUT → ECHO → SPINBACK → FADE. AUTO plans per pair and carries a 25 % seam budget (cut/echo/spinback instead of a blend, never the same seam twice); spinback throws the outgoing record backwards on the cut — its overlap progresses on the audio clock because the track position runs backwards |
+| FX slot dropdown | picks which of the 15 rack units the button (or F/G/H/J) toggles; picking the other slot's effect swaps the slots. The rack (fixed order, always wired, bypassed units are idle gain hops): drive → crush → telephone → autowah → vowel → comb → flanger → phaser → chorus → gater → tremolo → autopan → echo → pingpong → reverb. Echo AND ping-pong ride the deck BPM from tickAudio; `FX_PRIMARY` names each unit's one-knob parameter for MIDI slot-1 control |
 | 🎧 (on the channel) | pre-fader listen on the cue bus (keys E/I) |
 | 🔈 (in the mixer) | "🔈 Audio outputs" menu: master and headphone device, applies immediately; "Reveal device names" fetches the labels via a media permission |
+| Performance readouts (cluster, under BASE/SYNC/DROP) | two booth-readable bipolar bars per deck, driven from engine truth each frame so MIDI knobs show live: channel filter (K1/K2 — side + corner frequency, "LP 703 Hz") and macro combo (K3/K4 — side + combo + amount, "HP DUB ECHO 76%"). The cluster grid deliberately overrides the legacy four-column `.deck-body` rule — that rule once squeezed the performance column to 131 px |
 | Kill buttons (HI/MID/LOW) | toggle to −26 dB and back to 0 |
 | Level meters | classic segmented meters (channel horizontal under the wave, master vertical mid-stage): fire palette, red overshoot ≥ 0.9 with clip latch and peak hold. They replaced the oscilloscope scopes |
 | Beat-loop buttons | second press on the same length exits the loop |
@@ -612,14 +626,21 @@ Interactions with non-obvious behavior:
 | Cue bridge gate | the second AudioContext stays muted until the cue device differs from the master device — same-device output would double-play with a few ms offset and comb-filter the bass away |
 | LINE IN (bottom bar) | a live input (virtual cable, phone, turntable preamp) as a third channel into the master: gain fader + L bass-kill. A MediaStream cannot seek/scratch/analyze, so it is deliberately a channel, not a deck. Browser processing (AGC etc.) is off. Needs media permission — devices-mode shell or standalone; the button turns red where the sandbox refuses |
 | Waveform | always a playhead-centered zoom window (default ×8, wheel or −/+ for ×2–×64, the ×8 label resets; the beat row zooms both lanes together). Drag scrubs — slide the wave under the fixed playhead, seeks rate-limited to ~30/s — a plain click still jumps to the time under the cursor. The overview strip seeks on click. Bar-1 lines are stronger and anchored to the detected downbeat. Double-click on a track row loads into Deck A |
-| HOT CUES (1–4) | empty pad stores the current position, set pad jumps (and fires from stop, CDJ-style); double-click clears. Session-scoped, cleared on load |
+| HOT CUES (1–4) | empty pad stores the current position, set pad jumps (and fires from stop, CDJ-style); double-click clears. Cleared on load — unless the track is in the setlist, which restores its stored marks. Drawn as numbered ember pins on the zoom wave + ticks on the overview |
+| ● REC (header) | records the master bus (post master gain) via MediaStreamDestination + MediaRecorder, webm/opus at 192 kbps; the button pulses with elapsed time, stopping downloads the file. Opus squashes silence — the smoke check plays a deck through it for that reason |
+| ⚡ SHOW (automix bar) | the autopilot: fills the queue when empty, automix on with SMART order, performer on top. Again = everything stands down |
+| ⛶ STAGE (header) | the beamer face: browser hidden, lanes render natively at 110 px (sizeWave follows the CSS height), booth noise tucked away. `?stage=1` boots into it in standalone; inside the shell use the button |
+| Stage visualizer (`src/ui/visualizer.js`) | ZapViz's viewer mechanics gone audio: a canvas feedback loop (previous frame re-drawn zoomed/rotated/dimmed = trails) whose strength rides ZapViz's auto-drift — the damped random-momentum walk bounded 15–65 — plus per-frame noise sparkles. Five presets (radial spectrum, osc ring, beat starburst, tunnel, 600B rainstorm) fed by the master analyser, rotating every ~30 s and on every handover. AUTOMODE ONLY, like Winamp: no picker, pointer-blind, stage-only, off under reduced-motion, dpr 1 |
+| Cypherpunk motion | scanlines drift over the wave stack, a bar-one pulse ripples the live platter + beat dot, the ticker/ON AIR "decrypt" through glyph noise (`scrambleTo` in dom.js — callers compare `_scrTarget`, so a running scramble never retriggers), the seam breathes ember while a handover runs, ⚡ SHOW glitches. All inside `@media (prefers-reduced-motion: no-preference)` |
 | Track markers (browser rows) | every row carries its live state: ON AIR · A/B (audible deck), DECK A/B (loaded), QUEUE n (position in the automix queue), PLAYED — plus the matching row tint |
 | UP NEXT rail | right of the track list: the next three queue entries as cards (Q1 highlighted), "+ QUEUE FROM LIST" fills the queue from the current view |
 | DROP (keys 3/4) | starts the deck sample-accurately on the other deck's next bar-1 — tempo synced beforehand, own entry point = cue snapped to its own 1, CDJ start without vinyl spin-up. Pressing again aborts |
 | TAP (keys T/U) | tap tempo: hit it on every beat. Uses playback-position deltas (median), so it yields the BASE bpm regardless of the tempo fader; from the 4th tap BPM + beat grid are set and marked manual. Taps give the beat, not the 1 — `barOffset` re-anchors to the tapped grid |
-| Auto-scratch (quick buttons + SCRATCH… book) | scripted turntablism over the granular platter (`src/audio/autoscratch.js`, ported from PR #8): 18 patterns in Foundation/Cuts/Clicks families. Record motion is analytic (no drift, cycles return to the anchor — except backspin, which is `free`), the fader gates are sample-accurate ramps on the per-deck `scratchGate` node, offset by `GRAIN_LATENCY` so clicks land on what the grain queue is actually playing. Loops until toggled off; picking another pattern swaps at the next cycle. The one sanctioned timer in the app (5 ms) — gates schedule against the audio clock and must survive a hidden tab |
+| Auto-scratch (dropdown + SCRATCH button) | scripted turntablism over the granular platter (`src/audio/autoscratch.js`, ported from PR #8): 20 patterns in Foundation/Cuts/Clicks families. The dropdown ARMS a move (`deck.scratchChoice`, survives loads); the SCRATCH button — and the top MIDI pad row — throws it, loops until tapped off, and a repick mid-scratch swaps at the next cycle boundary. Record motion is analytic (no drift, cycles return to the anchor — except backspin, which is `free`), the fader gates are sample-accurate ramps on the per-deck `scratchGate` node, offset by `GRAIN_LATENCY` so clicks land on what the grain queue is actually playing. The one sanctioned timer in the app (5 ms) — gates schedule against the audio clock and must survive a hidden tab |
 | ✦ PERFORM (automix bar) | bar-synced performer (`src/audio/performer.js`, ported from PR #8): per-track mood (weighted toward calm) rolls gestures — scratch bursts, loop rolls, FX bursts, filter sweeps, band isolation, fader chops, blends. Every gesture registers an undo that fires when its bars expire or a human touches the deck; crossfader gestures stand down while the automix runs a handover. Mood + last action read out next to the button |
 | "+" on a track row / "+ all → playlist" above the list | adds the track(s) to the playlist (Crate tab). There: a menu of all entries, × removes, "Show playlist" renders it as a loadable list |
+| ★ SET & CRATE (mode row above the source tabs) | set and crate are ONE place: the setlist (`src/lib/setlist.js`, blob `setlist.v1`) as the list, the crate side panel (playlist chips, saved artists/albums, local shortcuts) beside it. ☆ on any row adds a track — with the deck's CURRENT marks when it is loaded; cue/hot-cue changes on listed tracks write back live (debounced persist); loading a listed track restores its marks. The ★ list's rows carry ▲▼ running-order controls and a marks badge; the source tabs hide (one level below). ⤓ save downloads `setlist.json` (cues included; needs `allow-downloads` on the frame — the dev shell grants it), and 📁 re-imports it (merge, dedupe by id) |
+| Local source tab | home of every imported file (`src/lib/localsongs.js`, blob `localsongs.v1`): session tracks playable, remembered-only catalog entries as greyed ghosts — File handles cannot persist in the sandbox, a re-import with the same name+size re-arms them. The Crate slot in the strip belongs to Local now; the crate itself lives under ★ |
 
 ---
 

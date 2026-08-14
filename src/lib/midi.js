@@ -6,20 +6,25 @@
  * (outer = deck edge, inner = the shared middle), no automix pads:
  *
  *   13 A·SCRATCH  14 A·BACKSPIN  15 B·BACKSPIN  16 B·SCRATCH
- *    9 A·LOOP 4   10 A·FX hold   11 B·FX hold   12 B·LOOP 4
+ *      (SCRATCH throws the move armed in the deck's dropdown — same as the
+ *       on-screen SCRATCH button; tap again to stop, repick to swap live)
+ *    9 A·LOOP 4   10 A·FX2 tap   11 B·FX2 tap   12 B·LOOP 4
  *    5 A·SYNC      6 A·DROP       7 B·DROP       8 B·SYNC
  *    1 A·PLAY      2 A·CUE        3 B·CUE        4 B·PLAY
  *
  *   Knobs — K1+K3 belong to deck A, K2+K4 to deck B, K5 is the crossfader
  *   and K6 the headphone level. The master stays in the browser on purpose:
- *   K1 A filter · K3 A macro · K5 crossfader
- *   K2 B filter · K4 B macro · K6 cue volume
+ *   K1 A filter · K3 A slot-1 FX · K5 crossfader
+ *   K2 B filter · K4 B slot-1 FX · K6 cue volume
  *
- * FX pads are MOMENTARY (hold to ride, release to drop out) — they punch the
- * deck's first FX slot, macros included. Everything else toggles on hit.
+ * The FX split is one hand per slot: K3/K4 DRIVE slot 1 (the unit's primary
+ * amount — mix, drive, vowel morph, macro knob …; near zero switches it off),
+ * the FX2 pads TOGGLE slot 2. Both effects stay reachable at once.
  * WebMIDI needs a real origin: devices-mode shell or standalone, like every
  * other media capability here.
  */
+
+import { FX_PRIMARY } from '../audio/engine.js';
 
 export const MPD218_MAP = {
   pads: {
@@ -36,7 +41,31 @@ export function createMidi({ mixer, automix, onCrossfade, onStatus }) {
   const say = onStatus || (() => {});
 
   // Momentary actions receive the pad state; everything else fires on hit.
-  const momentary = new Set(['a.fx', 'b.fx']);
+  const momentary = new Set();
+
+  /**
+   * K3/K4: drive whatever sits in FX slot 1. A macro entry gets the bipolar
+   * knob; an insert unit gets its primary amount, and near-zero releases it.
+   */
+  const driveSlot1 = (deck, v) => {
+    const t = deck.fxSlots[0];
+    if (typeof t === 'string' && t.startsWith('macro:')) {
+      deck.setMacroValue(v * 2 - 1);
+      return;
+    }
+    if (v <= 0.04) {
+      deck.toggleFx(t, false);
+      return;
+    }
+    deck.toggleFx(t, true);
+    const param = FX_PRIMARY[t];
+    if (!param) return;
+    // Map the 0..1 pot onto the parameter's own range.
+    const spans = { drive: [0, 1], depth: [0, 1], width: [0, 1], mix: [0, 1], vowel: [0, 1] };
+    const [lo, hi] = spans[param] || [0, 1];
+    deck.setFx(t, { [param]: lo + v * (hi - lo) });
+  };
+
   const actions = {
     'a.play': () => decks.A.toggle(),
     'b.play': () => decks.B.toggle(),
@@ -48,11 +77,11 @@ export function createMidi({ mixer, automix, onCrossfade, onStatus }) {
     'b.drop': () => decks.B.emit('drop-request'),
     'a.loop4': () => decks.A.setLoopBeats(4),
     'b.loop4': () => decks.B.setLoopBeats(4),
-    'a.fx': (down) => decks.A.toggleFx(decks.A.fxSlots[0], down),
-    'b.fx': (down) => decks.B.toggleFx(decks.B.fxSlots[0], down),
-    'a.scratch': () => decks.A.toggleAutoScratch('baby'),
+    'a.fx': () => decks.A.toggleFx(decks.A.fxSlots[1]),
+    'b.fx': () => decks.B.toggleFx(decks.B.fxSlots[1]),
+    'a.scratch': () => decks.A.toggleAutoScratch(decks.A.scratchChoice),
     'a.backspin': () => decks.A.toggleAutoScratch('backspin'),
-    'b.scratch': () => decks.B.toggleAutoScratch('baby'),
+    'b.scratch': () => decks.B.toggleAutoScratch(decks.B.scratchChoice),
     'b.backspin': () => decks.B.toggleAutoScratch('backspin'),
   };
 
@@ -63,8 +92,8 @@ export function createMidi({ mixer, automix, onCrossfade, onStatus }) {
       if (onCrossfade) onCrossfade(mixer.crossfader);
     },
     cue: (v) => mixer.setCueVolume(v),
-    'a.macro': (v) => decks.A.setMacroValue(bipolar(v)),
-    'b.macro': (v) => decks.B.setMacroValue(bipolar(v)),
+    'a.macro': (v) => driveSlot1(decks.A, v),
+    'b.macro': (v) => driveSlot1(decks.B, v),
     'a.filter': (v) => decks.A.setFilter(bipolar(v)),
     'b.filter': (v) => decks.B.setFilter(bipolar(v)),
   };

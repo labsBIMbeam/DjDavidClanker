@@ -58,11 +58,16 @@ const ALLOW_HOSTS = [
 // allowlist via env: EXTRA_PROXY_HOSTS="music.example.org,127.0.0.1".
 const EXTRA_HOSTS = (process.env.EXTRA_PROXY_HOSTS || '')
   .split(',').map((s) => s.trim()).filter(Boolean);
-const hostAllowed = (h) => ALLOW_HOSTS.some((re) => re.test(h)) || EXTRA_HOSTS.includes(h);
+// Loopback is always fair game in a dev shell: the ingest service and a
+// local Navidrome live there, and requiring an env var to reach your own
+// machine made the ⤴ promote button silently dead on a plain `npm run shell`.
+const LOOPBACK = ['127.0.0.1', 'localhost', '[::1]'];
+const hostAllowed = (h) => ALLOW_HOSTS.some((re) => re.test(h))
+  || EXTRA_HOSTS.includes(h) || LOOPBACK.includes(h);
 // http: is acceptable for loopback and RFC1918-style LAN servers — that is
 // exactly where a self-hosted Navidrome lives.
 const protoAllowed = (u) => u.protocol === 'https:'
-  || (u.protocol === 'http:' && EXTRA_HOSTS.includes(u.hostname));
+  || (u.protocol === 'http:' && (EXTRA_HOSTS.includes(u.hostname) || LOOPBACK.includes(u.hostname)));
 
 const send = (res, code, type, body, extra = {}) => {
   res.writeHead(code, { 'content-type': type, 'access-control-allow-origin': '*', ...extra });
@@ -100,30 +105,44 @@ const server = http.createServer(async (req, res) => {
         return send(res, 403, 'text/plain', `host not allowed: ${parsed.hostname}`);
       }
       // The egress path occasionally returns a transient 5xx; one retry keeps
-      // the dev experience from looking like an app bug. The upstream abort
-      // must stay comfortably below the napplet shim's own resource.bytes
-      // timeout (~10 s), or the cache fallback answers a request nobody is
-      // waiting for anymore.
-      const grab = (ms) => fetch(target, { redirect: 'follow', signal: AbortSignal.timeout(ms) });
-      let upstream = null;
+      // the dev experience from looking like an app bug. The short abort
+      // guards the CONNECT phase only (it must stay under the napplet shim's
+      // own resource.bytes patience, or the cache fallback answers a request
+      // nobody waits for) — once headers arrive, a multi-MB audio body gets
+      // its own generous window. Aborting the whole fetch at 6 s silently
+      // downgraded every slow Wavlake track to the BASIC backend: no peaks,
+      // no waveform, no vinyl.
+      const grab = async (connectMs) => {
+        const ctrl = new AbortController();
+        let timer = setTimeout(() => ctrl.abort(), connectMs);
+        try {
+          const r = await fetch(target, { redirect: 'follow', signal: ctrl.signal });
+          clearTimeout(timer); // headers are in — now guard the body loosely
+          timer = setTimeout(() => ctrl.abort(), 120000);
+          const buf = Buffer.from(await r.arrayBuffer());
+          return { r, buf };
+        } finally {
+          clearTimeout(timer);
+        }
+      };
+      let got = null;
       try {
-        upstream = await grab(6000);
-        if (upstream.status >= 500) {
+        got = await grab(6000);
+        if (got.r.status >= 500) {
           await new Promise((r) => setTimeout(r, 400));
-          upstream = await grab(4000);
+          got = await grab(4000);
         }
       } catch {
-        upstream = null;
+        got = null;
       }
-      if (!upstream || upstream.status >= 500) {
+      if (!got || got.r.status >= 500) {
         const hit = await cacheRead(target);
         if (hit) return send(res, 200, hit.type, hit.buf, { 'x-proxy-cache': 'stale' });
-        if (!upstream) return send(res, 504, 'text/plain', 'upstream timeout');
+        if (!got) return send(res, 504, 'text/plain', 'upstream timeout');
       }
-      const buf = Buffer.from(await upstream.arrayBuffer());
-      const type = upstream.headers.get('content-type') || 'application/octet-stream';
-      if (upstream.ok) cacheWrite(target, type, buf);
-      return send(res, upstream.status, type, buf);
+      const type = got.r.headers.get('content-type') || 'application/octet-stream';
+      if (got.r.ok) cacheWrite(target, type, got.buf);
+      return send(res, got.r.status, type, got.buf);
     }
     send(res, 404, 'text/plain', 'not found');
   } catch (e) {

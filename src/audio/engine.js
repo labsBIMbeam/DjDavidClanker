@@ -28,11 +28,30 @@ import { detectBpm, waveformPeaks, rms, analyzeStructure, detectKey, keyObject }
 import { trackCacheId, getAnalysis, putAnalysis } from '../lib/analysiscache.js';
 import { Turntable, reversedBuffer } from './scratch.js';
 import { AutoScratch } from './autoscratch.js';
-import { Flanger, Gater, Phaser, Echo, Reverb, ChannelFilter } from './fx.js';
+import { loadKeylock, createKeylockNode } from './keylock.js';
+import {
+  Flanger, Gater, Phaser, Echo, Reverb, ChannelFilter,
+  Chorus, Tremolo, AutoPan, Drive, Crush, PingPong, Telephone, AutoWah, Vowel, Comb,
+} from './fx.js';
 import { MacroFX, MACRO_TYPES } from './macrofx.js';
 
 /** Insert order in the chain — modulation first, gate, then time-based tails. */
-export const FX_TYPES = ['flanger', 'phaser', 'gater', 'echo', 'reverb'];
+export const FX_TYPES = [
+  'flanger', 'phaser', 'chorus', 'gater', 'tremolo', 'autopan',
+  'drive', 'crush', 'echo', 'pingpong', 'reverb',
+  'telephone', 'autowah', 'vowel', 'comb',
+];
+
+/**
+ * Each unit's "one knob": what a single MIDI pot should drive when the unit
+ * sits in FX slot 1. Everything else stays at its panel value.
+ */
+export const FX_PRIMARY = {
+  flanger: 'mix', phaser: 'mix', chorus: 'mix', gater: 'depth',
+  tremolo: 'depth', autopan: 'width', drive: 'drive', crush: 'mix',
+  echo: 'mix', pingpong: 'mix', reverb: 'mix', telephone: 'width',
+  autowah: 'mix', vowel: 'vowel', comb: 'mix',
+};
 export { FILTER_MODELS } from './fx.js';
 export { MACRO_TYPES, MACRO_LABELS } from './macrofx.js';
 
@@ -98,10 +117,12 @@ export class Deck extends Emitter {
     /* loop + sync */
     this.loop = { active: false, start: 0, end: 0, beats: 0 };
     this.syncedTo = null; // other deck while SYNC is latched
-    this._lastPhaseSeek = 0;
     this._taps = []; // tap-tempo ring: { t: wall ms, pos: track seconds }
     this.autoScratch = null; // active auto-scratch pattern name
+    this.scratchChoice = 'baby'; // the move armed in the UI dropdown (survives loads)
     this._autoscratch = null; // AutoScratch instance, created on first use
+    this.keylock = false; // tempo without pitch — corrected by the worklet
+    this._keylockNode = null;
     this.hotCues = [null, null, null, null]; // also reset per load()
 
     /* vinyl */
@@ -119,6 +140,16 @@ export class Deck extends Emitter {
       gater: { on: false, division: 0.5, duty: 0.5, depth: 1, smooth: 0.25 },
       echo: { on: false, division: 0.5, feedback: 0.45, mix: 0.5 },
       reverb: { on: false, decay: 1.6, tone: 5000, mix: 0.35 },
+      chorus: { on: false, rate: 0.6, depth: 0.004, mix: 0.5 },
+      tremolo: { on: false, rate: 5, depth: 0.7 },
+      autopan: { on: false, rate: 1, width: 0.8 },
+      drive: { on: false, drive: 0.5, tone: 6500, mix: 0.8 },
+      crush: { on: false, bits: 6, mix: 0.8 },
+      pingpong: { on: false, division: 0.75, feedback: 0.45, mix: 0.4 },
+      telephone: { on: false, width: 0.5 },
+      autowah: { on: false, rate: 1.2, res: 8, range: 0.6, mix: 0.85 },
+      vowel: { on: false, vowel: 0, res: 9, mix: 0.9 },
+      comb: { on: false, freq: 220, feedback: 0.8, mix: 0.5 },
     };
     /** Which two units the deck's FX buttons drive. The chain holds all five. */
     this.fxSlots = ['flanger', 'gater'];
@@ -176,12 +207,36 @@ export class Deck extends Emitter {
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 1024;
 
+    // The full insert rack, fixed order: tone-shapers first (drive/crush/
+    // character filters), then modulation, then rhythmic gates, then the
+    // time-based tails. Bypassed units are a couple of idle gain hops.
+    const chorus = new Chorus(ctx);
+    const tremolo = new Tremolo(ctx);
+    const autopan = new AutoPan(ctx);
+    const drive = new Drive(ctx);
+    const crush = new Crush(ctx);
+    const pingpong = new PingPong(ctx);
+    const telephone = new Telephone(ctx);
+    const autowah = new AutoWah(ctx);
+    const vowel = new Vowel(ctx);
+    const comb = new Comb(ctx);
+
     trim.connect(low).connect(mid).connect(high).connect(filter.input);
-    filter.output.connect(flanger.input);
+    filter.output.connect(drive.input);
+    drive.output.connect(crush.input);
+    crush.output.connect(telephone.input);
+    telephone.output.connect(autowah.input);
+    autowah.output.connect(vowel.input);
+    vowel.output.connect(comb.input);
+    comb.output.connect(flanger.input);
     flanger.output.connect(phaser.input);
-    phaser.output.connect(gater.input);
-    gater.output.connect(echo.input);
-    echo.output.connect(reverb.input);
+    phaser.output.connect(chorus.input);
+    chorus.output.connect(gater.input);
+    gater.output.connect(tremolo.input);
+    tremolo.output.connect(autopan.input);
+    autopan.output.connect(echo.input);
+    echo.output.connect(pingpong.input);
+    pingpong.output.connect(reverb.input);
     reverb.output.connect(macro.input);
     // scratchGate: the autoscratch's battle fader. It sits where a mixer's
     // cut-in fader would, but per deck, so scratch cuts never fight the real
@@ -202,7 +257,11 @@ export class Deck extends Emitter {
     macro.setType(this.macro.type);
     macro.setValue(this.macro.value);
 
-    this._graph = { trim, low, mid, high, filter, flanger, phaser, gater, echo, reverb, macro, gain, scratchGate, analyser, cueSend };
+    this._graph = {
+      trim, low, mid, high, filter, flanger, phaser, gater, echo, reverb,
+      chorus, tremolo, autopan, drive, crush, pingpong, telephone, autowah, vowel, comb,
+      macro, gain, scratchGate, analyser, cueSend,
+    };
     this._analyseBuf = new Float32Array(analyser.fftSize);
     this._turntable = new Turntable(ctx, trim);
     this._applyMix();
@@ -714,7 +773,18 @@ export class Deck extends Emitter {
       // Restarting outside the region would play straight past it.
       if (offset > this.loop.end) offset = this.loop.start;
     }
-    src.connect(g.trim);
+    // The keylock worklet sits between the source and the strip — bypassed
+    // (ratio 1 = plain copy) whenever keylock is off. The platter/scratch
+    // path never runs through it: scratching is vinyl on purpose.
+    if (this.mixer.keylockReady) {
+      if (!this._keylockNode) this._keylockNode = createKeylockNode(ctx);
+      // Re-tie to trim each start: cheap, and safe should the graph rebuild.
+      this._keylockNode.disconnect();
+      this._keylockNode.connect(g.trim);
+      src.connect(this._keylockNode);
+    } else {
+      src.connect(g.trim);
+    }
     src.onended = () => {
       if (this._src === src && this._mode === 'source' && this.position >= this.duration - 0.05) {
         this.playing = false;
@@ -845,6 +915,15 @@ export class Deck extends Emitter {
   tickAudio(dt) {
     const step = clamp(dt, 0, 0.1);
 
+    // Keylock: correct the pitch by the inverse of whatever rate the deck is
+    // actually running (tempo fader AND the sync latch's bend), every tick.
+    if (this._keylockNode) {
+      const rate = this._mode === 'source' ? Math.abs(this.currentRate) : 0;
+      const want = this.keylock && rate > 0.5 && rate < 2 ? 1 / rate : 1;
+      const p = this._keylockNode.parameters.get('ratio');
+      if (Math.abs(p.value - want) > 0.0005) p.value = want;
+    }
+
     // Auto-scratch runs on its own 5 ms audio-clock timer (see autoscratch.js)
     // — the fader gates are AudioParam schedules and must not depend on rAF.
 
@@ -880,32 +959,31 @@ export class Deck extends Emitter {
       this.emit('drop');
     }
 
-    // SYNC latch: a hand permanently on the pitch fader. Small phase errors
-    // are ridden out with micro-nudges; big ones (deck was scratched, or it
-    // just started) get one hard realign, rate-limited so it cannot flutter.
+    // SYNC latch: a hand permanently on the pitch fader. Phase is ALWAYS
+    // caught by bending the rate toward the nearest beat, never by seeking —
+    // a seek is audible as a beat jump (exactly what a DJ complains about)
+    // and it rebuilds the source node. Large errors simply bend harder and
+    // ride in over a few seconds, like a hand on the platter edge.
     const o = this.syncedTo;
-    // The latch stays out while a scheduled start is armed: alignPhase seeks,
-    // and a seek would rebuild the source and destroy the pending start.
+    // The latch stays out while a scheduled start is armed: fighting an
+    // armed sample-accurate start would move the ground under it.
     if (o && !this._drop && this.backend === 'buffer' && this._mode === 'source' && this.playing
       && o.playing && this.bpm && o.effectiveBpm) {
-      const beat = 60 / this.effectiveBpm;
-      const obeat = 60 / o.effectiveBpm;
+      // Phase lives on the TRACK grid: position and beatOffset are track
+      // seconds, so the beat length must be 60/BASE bpm. Using effectiveBpm
+      // here warped the grid by the tempo-fader factor and the latch chased
+      // a drifting target — the old hard-realign seeks were masking that.
+      const beat = 60 / this.bpm;
+      const obeat = 60 / o.bpm;
       const mod = (x, m) => ((x % m) + m) % m;
       let err = mod(this.position - (this.beatOffset || 0), beat) / beat
         - mod(o.position - (o.beatOffset || 0), obeat) / obeat;
       if (err > 0.5) err -= 1;
       if (err < -0.5) err += 1;
-      const nowMs = performance.now();
-      if (Math.abs(err) > 0.1) {
-        // A big jump (seek, scratch landing) gets caught immediately; the
-        // cooldown only guards against flutter around the threshold.
-        const cooldown = Math.abs(err) > 0.25 ? 250 : 900;
-        if (nowMs - this._lastPhaseSeek > cooldown) {
-          this._lastPhaseSeek = nowMs;
-          this.alignPhase(o);
-        }
-      } else if (Math.abs(err) > 0.004) {
-        this.setNudge(clamp(-err * 0.08, -0.008, 0.008));
+      if (Math.abs(err) > 0.004) {
+        // Half a beat at the hardest bend (4 %) rides in over ~6 s @128 BPM.
+        const bend = Math.abs(err) > 0.25 ? 0.04 : Math.abs(err) > 0.1 ? 0.02 : 0.008;
+        this.setNudge(clamp(-err * 0.15, -bend, bend));
       } else if (this.nudgeAmount !== 0) {
         this.setNudge(0);
       }
@@ -916,6 +994,7 @@ export class Deck extends Emitter {
       this._graph.gater.set({ bpm });
       this._graph.gater.tick();
       this._graph.echo.set({ bpm });
+      this._graph.pingpong.set({ bpm });
       this._graph.macro.tick(bpm);
     }
   }
@@ -978,8 +1057,8 @@ export class Deck extends Emitter {
     }
     if (best === null) return false;
     this.setTempo(best);
-
-    if (typeof other === 'object' && other && other.playing && this.playing) this.alignPhase(other);
+    // No phase seek on engage: setSynced() hands the phase to the latch,
+    // which bends it in smoothly. Seeking here was audible as a beat jump.
     return true;
   }
 
@@ -1054,6 +1133,12 @@ export class Deck extends Emitter {
   /** True while the scripted hand (not a human) is on the platter. */
   get autoScratching() {
     return Boolean(this._autoscratch && this._autoscratch.running);
+  }
+
+  /** Keylock: tempo keeps moving through playbackRate, pitch stays put. */
+  setKeylock(on) {
+    this.keylock = Boolean(on) && this.mixer.keylockReady;
+    this.emit('mix');
   }
 
   /** Latch or release SYNC. While latched, tickAudio keeps the phase locked. */
@@ -1345,6 +1430,22 @@ export class Mixer extends Emitter {
     this.decks.A = new Deck(this, 'A');
     this.decks.B = new Deck(this, 'B');
     this._lastTick = 0;
+
+    /**
+     * Manual-mix tempo master: 'A' | 'B' | null. While set, SYNC always pulls
+     * the OTHER deck onto this one and refuses to touch the master itself —
+     * the classic mistake of syncing the playing deck onto the silent one
+     * becomes impossible. null = no explicit master (SYNC targets the
+     * counterpart, as before). The automix ignores this: its transitions
+     * always sync the incoming deck onto the outgoing one by construction.
+     */
+    this.syncMaster = null;
+  }
+
+  /** The deck a manual SYNC on `deck` should pull toward. */
+  masterFor(deck) {
+    if (this.syncMaster && this.syncMaster !== deck.id) return this.decks[this.syncMaster];
+    return this.decks[deck.id === 'A' ? 'B' : 'A'];
   }
 
   ensureContext() {
@@ -1352,6 +1453,9 @@ export class Mixer extends Emitter {
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return null;
     this.ctx = new Ctx({ latencyHint: 'interactive' });
+    // Keylock worklet loads async; decks route through it once ready.
+    this.keylockReady = false;
+    loadKeylock(this.ctx).then((ok) => { this.keylockReady = ok; });
     this.masterGain = this.ctx.createGain();
     this.masterGain.gain.value = this.master;
     this.masterAnalyser = this.ctx.createAnalyser();
@@ -1520,6 +1624,49 @@ export class Mixer extends Emitter {
     this.crossfader = clamp(v, -1, 1);
     this._applyCrossfader();
     this.emit('crossfader');
+  }
+
+  /* ---------------------------- recording ---------------------------- */
+
+  /**
+   * Record the master bus (post master gain, pre device) into a webm/opus
+   * blob. One recorder at a time; stop() resolves the finished Blob.
+   */
+  startRecording() {
+    if (!this.ctx || this._rec) return false;
+    try {
+      const dest = this.ctx.createMediaStreamDestination();
+      this.masterGain.connect(dest);
+      const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus' : 'audio/webm';
+      const rec = new MediaRecorder(dest.stream, { mimeType: mime, audioBitsPerSecond: 192000 });
+      const chunks = [];
+      rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+      rec.start(1000);
+      this._rec = { rec, dest, chunks, startedAt: Date.now() };
+      this.emit('recording');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  get recording() {
+    return this._rec ? { since: this._rec.startedAt } : null;
+  }
+
+  stopRecording() {
+    const r = this._rec;
+    if (!r) return Promise.resolve(null);
+    this._rec = null;
+    return new Promise((resolve) => {
+      r.rec.onstop = () => {
+        try { this.masterGain.disconnect(r.dest); } catch { /* already gone */ }
+        this.emit('recording');
+        resolve(new Blob(r.chunks, { type: r.rec.mimeType }));
+      };
+      try { r.rec.stop(); } catch { resolve(null); }
+    });
   }
 
   setMaster(v) {

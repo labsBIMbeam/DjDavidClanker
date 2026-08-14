@@ -86,3 +86,34 @@ export function fader({ min, max, step, value, orient = 'h', label, onInput, cla
   });
   return input;
 }
+
+/**
+ * Cypherpunk text swap: the new value "decrypts" through a short burst of
+ * glyph noise. Honors prefers-reduced-motion (instant set). Callers compare
+ * against `el._scrTarget` so a running scramble does not retrigger.
+ */
+const SCR_GLYPHS = '01<>[]#$%&/=+*';
+export function scrambleTo(el, text, ms = 260) {
+  if (el._scrTarget === text) return;
+  el._scrTarget = text;
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    el.textContent = text;
+    return;
+  }
+  if (el._scrTimer) clearInterval(el._scrTimer);
+  const from = performance.now();
+  el._scrTimer = setInterval(() => {
+    const k = Math.min(1, (performance.now() - from) / ms);
+    const fixed = Math.floor(text.length * k);
+    let out = text.slice(0, fixed);
+    for (let i = fixed; i < text.length; i++) {
+      out += text[i] === ' ' ? ' ' : SCR_GLYPHS[(Math.random() * SCR_GLYPHS.length) | 0];
+    }
+    el.textContent = out;
+    if (k >= 1) {
+      clearInterval(el._scrTimer);
+      el._scrTimer = 0;
+      el.textContent = text;
+    }
+  }, 34);
+}

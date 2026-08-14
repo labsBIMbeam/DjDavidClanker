@@ -173,22 +173,33 @@ await frame.evaluate(() => {
 await page.waitForTimeout(600);
 await frame.evaluate(() => {
   const { A, B } = window.__djclanker.decks;
+  // Engage = tempo match + latch. Phase is BENT in by the latch over a few
+  // seconds now (never seeked — a seek is an audible beat jump).
   B.syncTo(A);
+  B.setSynced(A);
 });
-await page.waitForTimeout(800);
+await page.waitForTimeout(8500);
 const sync = await frame.evaluate(() => {
   const { A, B } = window.__djclanker.decks;
   const mod = (x, m) => ((x % m) + m) % m;
-  const beatA = 60 / A.effectiveBpm;
-  const beatB = 60 / B.effectiveBpm;
+  // Track-grid phase: 60/BASE bpm against track positions, same as the engine.
+  const beatA = 60 / A.bpm;
+  const beatB = 60 / B.bpm;
   const pa = mod(A.position - (A.beatOffset || 0), beatA) / beatA;
   const pb = mod(B.position - (B.beatOffset || 0), beatB) / beatB;
   let err = Math.abs(pa - pb);
   if (err > 0.5) err = 1 - err;
-  return { tempoB: B.tempo, err, bpmA: A.effectiveBpm, bpmB: B.effectiveBpm };
+  // Nudge-free effective bpm: the latch is still bending the phase in, and
+  // the momentary rate must not read as a tempo mismatch.
+  return { tempoB: B.tempo, err, bpmA: A.effectiveBpm, bpmB: B.bpm * (1 + B.tempo / 100) };
 });
 check('sync matched the tempo', Math.abs(sync.bpmA - sync.bpmB) < 0.05, `${sync.bpmA.toFixed(2)} vs ${sync.bpmB.toFixed(2)}`);
-check('sync landed on the beat grid', sync.err < 0.06, `phase error ${(sync.err * 100).toFixed(1)} % of a beat`);
+check('sync bends onto the beat grid (no seek)', sync.err < 0.08, `phase error ${(sync.err * 100).toFixed(1)} % of a beat`);
+await frame.evaluate(() => {
+  const B = window.__djclanker.decks.B;
+  B.setSynced(null);
+  B.setNudge(0);
+});
 
 /* ----------------------------- cue bus ----------------------------- */
 
@@ -257,19 +268,20 @@ await frame.evaluate(() => {
   const { A, B } = window.__djclanker.decks;
   B.seek(B.position + 0.31 * (60 / A.effectiveBpm));
 });
-await page.waitForTimeout(3500);
+// Bend-only recovery: 0.31 of a beat rides in over several seconds.
+await page.waitForTimeout(7000);
 const caught = await frame.evaluate(() => {
   const { A, B } = window.__djclanker.decks;
   const mod = (x, m) => ((x % m) + m) % m;
-  const beatA = 60 / A.effectiveBpm;
-  const beatB = 60 / B.effectiveBpm;
+  const beatA = 60 / A.bpm;
+  const beatB = 60 / B.bpm;
   const pa = mod(A.position - (A.beatOffset || 0), beatA) / beatA;
   const pb = mod(B.position - (B.beatOffset || 0), beatB) / beatB;
   let err = Math.abs(pa - pb);
   if (err > 0.5) err = 1 - err;
   return err;
 });
-check('latch re-catches a perturbed deck', caught < 0.06, `error ${(caught * 100).toFixed(1)} % of a beat`);
+check('latch re-catches a perturbed deck by bending', caught < 0.08, `error ${(caught * 100).toFixed(1)} % of a beat`);
 
 await frame.locator('.deck-B .btn-sync').click();
 await page.waitForTimeout(300);
@@ -453,6 +465,57 @@ check('auto-scratch stop hands back to playback', asEnd.pattern === null && asEn
   `mode=${asEnd.mode}`);
 check('baby scratch stays near its spot', Math.abs(asEnd.pos - asStart.posBefore) < 4,
   `drift ${(asEnd.pos - asStart.posBefore).toFixed(2)}s`);
+
+// Keylock: the worklet must correct pitch by the inverse of the actual rate.
+const key = await frame.evaluate(async () => {
+  const dj = window.__djclanker;
+  const A = dj.decks.A;
+  for (let i = 0; i < 20 && !dj.mixer.keylockReady; i++) await new Promise((r) => setTimeout(r, 250));
+  if (!dj.mixer.keylockReady) return { ready: false };
+  if (!A.playing) A.toggle();
+  A.setKeylock(true);
+  A.setTempo(8);
+  await new Promise((r) => setTimeout(r, 600));
+  const ratioOn = A._keylockNode.parameters.get('ratio').value;
+  const expected = 1 / A.currentRate;
+  A.setKeylock(false);
+  await new Promise((r) => setTimeout(r, 400));
+  const ratioOff = A._keylockNode.parameters.get('ratio').value;
+  A.setTempo(0);
+  A.pause();
+  return { ready: true, ratioOn, expected, ratioOff };
+});
+check('keylock corrects pitch by the inverse playback rate',
+  key.ready && Math.abs(key.ratioOn - key.expected) < 0.002,
+  key.ready ? `${key.ratioOn.toFixed(4)} vs ${key.expected.toFixed(4)}` : 'worklet unavailable');
+check('keylock off returns the worklet to plain copy',
+  key.ready && Math.abs(key.ratioOff - 1) < 0.002, key.ready ? `${key.ratioOff}` : 'n/a');
+
+/* ------------------------------ hot cues ------------------------------ */
+
+const hc = await frame.evaluate(async () => {
+  const A = window.__djclanker.decks.A;
+  A.pause();
+  A.seek(30);
+  A.hotCue(0); // empty pad stores
+  const stored = A.hotCues[0];
+  A.seek(60);
+  A.hotCue(0); // set pad jumps — and fires from stop, CDJ style
+  await new Promise((r) => setTimeout(r, 300)); // let playback + a UI tick land
+  const jumped = Math.abs(A.position - stored) < 1.5;
+  const playing = A.playing;
+  const uiSet = document.querySelector('.deck-top.deck-A .btn-hotcue').classList.contains('set');
+  A.clearHotCue(0);
+  const cleared = A.hotCues[0] === null;
+  A.pause();
+  return { stored, jumped, playing, uiSet, cleared };
+});
+check('hot cue: empty pad stores the position', typeof hc.stored === 'number' && Math.abs(hc.stored - 30) < 0.5,
+  `stored=${hc.stored}`);
+check('hot cue: set pad jumps and fires from stop', hc.jumped && hc.playing,
+  `jumped=${hc.jumped} playing=${hc.playing}`);
+check('hot cue: pad lights while set, clear empties it', hc.uiSet && hc.cleared,
+  `ui=${hc.uiSet} cleared=${hc.cleared}`);
 
 await page.screenshot({ path: `${OUT}-decks.png`, fullPage: true });
 await browser.close();

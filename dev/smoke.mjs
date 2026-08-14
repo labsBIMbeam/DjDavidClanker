@@ -24,6 +24,16 @@ const browser = await chromium.launch({
 });
 const page = await browser.newPage({ viewport: { width: 1440, height: 1200 } });
 
+// A mock NIP-07 signer on the SHELL page (real origin) — the extension's
+// place in the architecture. Lets the sign-in + signed-publish path run
+// headless without keys or network.
+await page.addInitScript(() => {
+  window.nostr = {
+    getPublicKey: async () => 'ab'.repeat(32),
+    signEvent: async (ev) => ({ ...ev, id: 'ee'.repeat(32), sig: 'ff'.repeat(64) }),
+  };
+});
+
 const errors = [];
 page.on('console', (m) => {
   if (m.type() === 'error') errors.push(m.text());
@@ -377,6 +387,50 @@ const realErrors = errors.filter(
   (e) => !/favicon|Autoplay|play\(\) request|status of 5\d\d/i.test(e),
 );
 check('no console errors', realErrors.length === 0, realErrors.slice(0, 3).join(' | '));
+
+// Master-bus set recording: a couple of seconds must land as real bytes.
+const rec = await frame.evaluate(async () => {
+  const dj = window.__djclanker;
+  const m = dj.mixer;
+  m.ensureContext();
+  // Opus squeezes silence to nothing — record actual programme material.
+  const A = dj.decks.A;
+  const wasPlaying = A.playing;
+  if (m.resumeAudio) m.resumeAudio();
+  if (m.ctx && m.ctx.state !== 'running') await m.ctx.resume().catch(() => {});
+  const xfBefore = m.crossfader;
+  m.setCrossfader(-1); // deck A must actually reach the master bus
+  if (A.status === 'ready' && !A.playing) A.toggle();
+  const started = m.startRecording();
+  await new Promise((r) => setTimeout(r, 2200));
+  const active = Boolean(m.recording);
+  const playing = A.playing;
+  const blob = await m.stopRecording();
+  if (!wasPlaying && A.playing) A.pause();
+  m.setCrossfader(xfBefore);
+  return {
+    started, active, bytes: blob ? blob.size : 0, stopped: !m.recording,
+    playing, ctxState: m.ctx ? m.ctx.state : 'none', deck: A.status,
+  };
+});
+check('set recording captures the master bus', rec.started && rec.active && rec.stopped && rec.bytes > 5000,
+  JSON.stringify(rec));
+
+// NIP-07: sign in on the shell, then a publish from the napplet must come
+// back carrying the extension's signature (relays skipped via ?norelay=1).
+await page.goto(`${BASE}/?norelay=1`, { waitUntil: 'domcontentloaded' });
+const frame2 = await (await page.waitForSelector('#frame')).contentFrame();
+await frame2.waitForSelector('.deck-A', { timeout: 15000 });
+await page.locator('#nip07').click();
+await page.waitForTimeout(300);
+const whoText = await page.locator('#who').textContent();
+check('NIP-07 sign-in flips the shell identity', whoText.includes('(NIP-07)'), whoText);
+const pub = await frame2.evaluate(async () => {
+  const r = await window.napplet.outbox.publish({ kind: 1, content: 'clanker smoke', tags: [] });
+  return { ok: r && r.ok, sig: r && r.event && r.event.sig, pk: r && r.event && r.event.pubkey };
+});
+check('publish returns the extension-signed event', pub.ok === true && pub.sig === 'ff'.repeat(64)
+  && pub.pk === 'ab'.repeat(32), JSON.stringify(pub).slice(0, 80));
 
 await browser.close();
 

@@ -44,18 +44,33 @@ network access to a host shell.
   the seam. Empty lanes run the 600B matrix rain
 - CUE with CDJ logic (set while stopped, jump back while playing), plus
   **4 hot cues** per deck: empty pad stores, set pad jumps (fires from
-  stop), double-click clears
+  stop), double-click clears — drawn as numbered ember pins on the zoom
+  wave and as ticks on the overview strip
+- **● REC**: record the master bus; stopping downloads the whole set as a
+  webm/opus file. **⚡ SHOW**: one button arms the full autopilot — queue,
+  automix with SMART order, performer riding on top
+- **⛶ STAGE + visualizer**: the beamer face runs a ZapViz-style feedback
+  visualizer behind the decks — auto-drifting trails, noise sparkles and
+  five audio-reactive presets rotating on their own, Winamp automode style
 - **Beat loops**: IN/OUT for manual loops, 1/2/4/8 snap onto the detected
   grid, EXIT leaves
 - **Tempo fader** ±8 / ±16 / ±50 %, BPM detection with beat phase and 4/4
-  downbeat, **SYNC** as a latch: pulls BPM *and* beat phase onto the other
-  deck (incl. half/double tempo) and keeps the phase locked until released
+  downbeat, **SYNC** as a latch: pulls BPM *and* beat phase onto the tempo
+  master (incl. half/double tempo) and keeps the phase locked by bending
+  the rate — never by seeking. **KEY** (keylock) stops the tempo fader from
+  bending the pitch: a granular worklet corrects it back live
 - **Quantized DROP**: starts the deck sample-accurately on the other deck's
   next bar-1
 - 3-band EQ with kill, bipolar filter sweep (LP ↔ HP), trim with auto-gain
 - Channel fader plus VU meter per deck
 
-**FX per deck** (insert after the filter)
+**FX per deck** (insert after the filter) — **15 units** in a fixed rack:
+flanger, phaser, chorus, gater, tremolo, autopan, drive, bitcrush, echo,
+ping-pong delay (both tempo-synced), reverb, and the special filters —
+telephone, auto-wah, vowel/formant morph (A–U), comb. Two switchable slots
+pick which units the buttons drive; on the MPD218 it is one hand per slot:
+K3/K4 turn slot 1 (the unit's primary amount — zero releases it), the FX2
+pads toggle slot 2.
 - **5 effects in 2 switchable slots**: flanger, phaser, gater, echo, reverb.
   A dropdown per slot picks which effect the button (or F/G/H/J) toggles;
   picking an effect already in the other slot swaps the slots.
@@ -80,8 +95,12 @@ network access to a host shell.
   sample-accurately on a phrase boundary at its mix-in point, kills its bass
   until the bass-swap phrase, keeps the phase latched and eases the
   crossfader; **ECHO** rides a dub tail out when the tempo gap is unreachable;
-  **CUT** drops on the phrase when a track ends hot; **FADE** is the old
-  crossfade and remains the fallback for anything uncertain
+  **CUT** drops on the phrase when a track ends hot; **SPINBACK** throws the
+  outgoing record hard backwards over the cut; **FADE** is the old crossfade
+  and remains the fallback for anything uncertain
+- AUTO carries a **seam budget**: roughly a quarter of handovers take an
+  audible exit (cut/echo/spinback) instead of an invisible blend — never the
+  same seam twice in a row. All blends goes flat; all cuts is exhausting
 - After every handover the tempo glides back to 0 % — a set never drifts
   sharp over the night
 - **SMART order** picks the next track by key compatibility, BPM closeness
@@ -94,7 +113,7 @@ network access to a host shell.
 - Switching it on mid-set adopts the running deck instead of starting over
 
 **Turntablism**
-- **18 scratch moves in three families** (ported from Zazawowow's PR #8):
+- **20 scratch moves in three families** (ported from Zazawowow's PR #8):
   Foundation (baby, drag, scribble, 2/3-click tears, hydroplane, backspin),
   Cuts (forward, stab, chirp) and Clicks (transformer, military, 1/2/3-click
   flares, crab with finger jitter, orbit both ways, uzi, drag tear). A
@@ -104,19 +123,38 @@ network access to a host shell.
 - Motion is analytic (velocity and displacement known at every instant), so
   cycles land back on the anchor and nothing drifts; humanize jitter keeps
   repeats from being bit-identical
-- Five quick buttons on each deck plus the full pattern book in a dropdown
+- One dropdown per deck arms a move from the book; one **SCRATCH** button
+  throws it and loops until tapped off (repick mid-scratch to swap live).
+  The top MIDI pad row hits the same button (plus dedicated backspin pads)
 - **✦ PERFORM**: a bar-synced performer rides the running mix — scratch
   bursts, loop rolls, FX bursts, filter sweeps, band isolation, fader chops
   and blends. Each track gets a mood (usually calm; busy/peak only when the
   music steps up), every gesture records its own undo, and anything a human
   touches is released instantly
 
+**Set & crate**
+- **★ SET & CRATE** sits one level above the sources: the setlist — your
+  ordered crate for the night — as the list, and the crate (playlist,
+  saved artists/albums, local shortcuts) in the side panel. ☆ on any row
+  puts a track into the set, and its performance marks (cue point + four
+  hot cues) ride along: set a hot cue on a listed track and it is stored;
+  load it later and the marks come back onto the deck. Reorder with ▲▼
+- **⤓ save** writes the setlist — cues included — as `setlist.json` on
+  your machine; drop the file back on 📁 and it merges in again
+- The **Local** source tab is the home of every imported file: session
+  tracks are playable, remembered-only entries (the catalog survives
+  reloads, file handles cannot) sit greyed until a re-import with the same
+  name+size re-arms them — ⤴ into the crate stays the permanent road
+
 **Sources**
 - **Wavlake** charts/search/genres (value4value — zap the artist while it
   plays), **Nostr** playlists, **local files** (drag & drop, analyzed in
   seconds, session-scoped)
 - **Your own server**: the Server tab speaks the Subsonic API to a
-  self-hosted Navidrome — your collection, full quality, salt+token auth
+  self-hosted Navidrome — your collection, full quality, salt+token auth.
+  A ready-made local instance ships in `ingest/docker-compose.yml`
+  (`cd ingest && docker compose up -d` → http://localhost:4533, serving
+  the same library folder the ingest pipeline fills)
 - **Discover**: Audius (open API, DJ catalog), Jamendo (Creative Commons —
   clean for public sets, free client_id) and Archive.org netlabels/live
   sets. Any find promotes into the crate with ⤴; Archive finds auto-promote
@@ -150,7 +188,9 @@ network access to a host shell.
 
 **Value4Value**
 - Zap button per track and per deck
-- Publish the session's setlist as a kind-30003 event
+- Publish the session's setlist as a kind-30003 event — and with **⚡
+  NIP-07** signed into the dev shell (Alby/nos2x on the shell's real
+  origin), it goes out signed by YOUR key to real relays
 
 **Design**
 - The UI follows the **600B design system** — tokens at the top of
@@ -322,7 +362,10 @@ For architecture, design decisions, test coverage and open items, see
 
 ## Known limits
 
-- **No keylock.** Changing the tempo shifts the pitch.
+- **Keylock is granular, not spectral.** The KEY button (per deck) corrects
+  pitch via a dual-tap granular worklet — clean for the sync range (±8/16 %),
+  audibly grainy toward the extremes. Scratching bypasses it on purpose:
+  a scratch without vinyl pitch is not a scratch.
 - **Scratch latency** sits around 45 ms — the grain queue has to be filled
   that far ahead so nothing drops out. Enough for baby scratches and
   transformer work; not for competition-level turntablism.

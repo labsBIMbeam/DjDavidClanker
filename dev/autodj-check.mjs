@@ -320,6 +320,7 @@ async function runTransition({ nudgeXfMidway = false } = {}) {
           phaseSnapshot.latched = phaseSnapshot.latched || idle.syncedTo === live;
         }
       }
+      if (tr && live.autoScratch === 'backspin') debug.sawBackspin = true;
       if (nudge && tr && tr.state === 'OVERLAP' && !nudged && tr.telemetry.startedAt) {
         dj.mixer.setCrossfader(0.9 * (idle.id === 'A' ? -1 : 1)); // human grabs it
         nudged = true;
@@ -347,6 +348,10 @@ await frame.evaluate(() => {
   // Reversed so the second cycle stages Beta while Alpha is live — a real
   // A→B→A rotation instead of the same file on both decks.
   dj.automix.setQueue([...dj.browser.currentItems()].reverse());
+  // Deterministic transitions for parts 1-2: the seam budget would otherwise
+  // roll a cut/spinback under the blend assertions. The budget's own dice
+  // are asserted separately in part 2b with an injected rng.
+  dj.automix.markedRate = 0;
   if (!dj.automix.enabled) dj.automix.toggle();
 });
 
@@ -390,12 +395,114 @@ check('transition 2: crossfader yielded to the human hand',
 check('no cumulative pitch drift after two transitions', Math.abs(t2.newDeck.tempo) < 3.5,
   `tempo=${t2.newDeck.tempo.toFixed(2)}%`);
 
+/* ------------- part 2b: seam budget + spinback transition ------------- */
+
+// Wait for the next idle deck to be staged and analyzed — both the planner
+// dice below and the spinback cycle need a fully-known pair.
+await frame.waitForFunction(() => {
+  const am = window.__djclanker.automix;
+  const idle = am.idleDeck;
+  return idle && idle.status === 'ready' && idle._analysisDone && !am.busy
+    && am.staleId !== idle.id;
+}, undefined, { timeout: 180000 });
+
+// The planner's seam budget is pure and rng-injectable — assert the dice.
+const seam = await frame.evaluate(() => {
+  const dj = window.__djclanker;
+  const live = dj.automix.liveDeck;
+  const idle = dj.automix.idleDeck;
+  const opts = { style: 'auto', fadeSeconds: 12, markedRate: 0.25 };
+  return {
+    budgetHit: dj.planTransition(live, idle, { ...opts, recentFlows: [], rng: () => 0 }).style,
+    noRepeat: dj.planTransition(live, idle, { ...opts, recentFlows: ['spinback'], rng: () => 0 }).style,
+    budgetMiss: dj.planTransition(live, idle, { ...opts, recentFlows: [], rng: () => 0.9 }).style,
+  };
+});
+check('seam budget: a hit picks the first free marked style (spinback)',
+  seam.budgetHit === 'spinback', seam.budgetHit);
+check('seam budget: the previous seam is never repeated', seam.noRepeat === 'cut', seam.noRepeat);
+check('seam budget: a miss stays on the invisible blend', seam.budgetMiss === 'blend', seam.budgetMiss);
+
+// Full spinback cycle: force the style, run a third handover, and the
+// outgoing deck must ride its backspin out while the fader crosses.
+await frame.evaluate(() => { window.__djclanker.automix.transitionStyle = 'spinback'; });
+const t3 = await runTransition();
+check('transition 3: spinback style executes and hands over',
+  t3.handedOver && t3.telemetry && t3.telemetry.style === 'spinback',
+  t3.telemetry ? t3.telemetry.style : JSON.stringify(t3.debug));
+check('transition 3: the outgoing record actually spun back',
+  t3.debug.sawBackspin === true && t3.oldDeck.paused,
+  `sawBackspin=${t3.debug.sawBackspin} paused=${t3.oldDeck.paused}`);
+await frame.evaluate(() => { window.__djclanker.automix.transitionStyle = 'auto'; });
+
 await frame.evaluate(() => {
   const dj = window.__djclanker;
   if (dj.automix.enabled) dj.automix.toggle();
   dj.decks.A.pause();
   dj.decks.B.pause();
 });
+
+/* ---------------- part 2c: manual tempo master + seamless latch ---------------- */
+
+// The fixtures sit 124/120 BPM apart — inside the ±8 % range, so a manual
+// SYNC latches without any tempo-range games.
+const master = await frame.evaluate(async () => {
+  const dj = window.__djclanker;
+  const A = dj.decks.A, B = dj.decks.B;
+  const live = dj.automix.liveDeck || A;
+  const other = dj.mixer.decks[live.id === 'A' ? 'B' : 'A'];
+  live.play(); other.play();
+  await new Promise((r) => setTimeout(r, 300));
+
+  dj.mixer.syncMaster = live.id;
+  const tempoBefore = live.tempo;
+  live.emit('sync-request'); // SYNC on the master must refuse
+  const blocked = live.syncedTo === null && live.tempo === tempoBefore;
+
+  other.emit('sync-request'); // SYNC on the slave pulls it onto the master
+  const latched = other.syncedTo === live;
+  const bpmOk = Math.abs(other.effectiveBpm - live.effectiveBpm) < 0.5;
+
+  // Knock the slave a third of a beat out on purpose: the latch must bend
+  // it back with rate only — tape-like position, no seek jumps.
+  const mod = (x, m) => ((x % m) + m) % m;
+  const phaseErr = () => {
+    const bl = 60 / live.bpm, bo = 60 / other.bpm;
+    let e = mod(other.position - (other.beatOffset || 0), bo) / bo
+      - mod(live.position - (live.beatOffset || 0), bl) / bl;
+    if (e > 0.5) e -= 1;
+    if (e < -0.5) e += 1;
+    return Math.abs(e);
+  };
+  other.seek(other.position + 0.33 * (60 / other.bpm));
+  await new Promise((r) => setTimeout(r, 200));
+  const errStart = phaseErr();
+  const jumps = [];
+  let sawBend = false;
+  let last = { t: performance.now(), p: other.position };
+  for (let i = 0; i < 14; i++) {
+    await new Promise((r) => setTimeout(r, 300));
+    const now = { t: performance.now(), p: other.position };
+    jumps.push(Math.abs((now.p - last.p) - ((now.t - last.t) / 1000) * other.currentRate));
+    if (other.nudgeAmount !== 0) sawBend = true;
+    last = now;
+  }
+  const errEnd = phaseErr();
+
+  dj.mixer.syncMaster = null;
+  other.setSynced(null);
+  live.pause(); other.pause();
+  return { blocked, latched, bpmOk, errStart, errEnd, maxJump: Math.max(...jumps), sawBend };
+});
+check('tempo master: SYNC on the master itself refuses', master.blocked);
+check('tempo master: SYNC pulls the other deck onto the master',
+  master.latched && master.bpmOk, `latched=${master.latched} bpmOk=${master.bpmOk}`);
+check('latch catches phase by bending, never by seeking',
+  master.maxJump < 0.12 && master.sawBend,
+  `maxJump=${master.maxJump.toFixed(3)}s bend=${master.sawBend}`);
+check('latch phase error shrinks toward zero',
+  master.errEnd < Math.max(0.1, master.errStart * 0.6),
+  `${master.errStart.toFixed(3)} → ${master.errEnd.toFixed(3)} beats`);
 
 /* ---------------------- part 3: smart selection ---------------------- */
 
@@ -524,8 +631,8 @@ check('order button reflects the SMART default', ui.orderLabel === 'SMART',
   `${ui.orderLabel}`);
 
 // Cached tracks get a "BPM · key" chip once the list re-renders.
-await frame.locator('.tab', { hasText: 'Crate' }).click();
-await frame.locator('.side-group .btn-ghost', { hasText: 'Show local files' }).click();
+await frame.locator('.tab', { hasText: 'Local' }).click();
+await frame.locator('.browser-h1', { hasText: 'Local songs' }).waitFor({ timeout: 10000 });
 const chip = await frame.evaluate(() => {
   const rows = [...document.querySelectorAll('.track-row')];
   const alpha = rows.find((r) => r.textContent.includes('Alpha'));

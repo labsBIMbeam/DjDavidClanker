@@ -1,7 +1,26 @@
-import { h, fader } from './dom.js';
+import { h, fader, scrambleTo } from './dom.js';
 
 /** Control strip for the Automix: on/off, skip, fade length, sync, shuffle. */
 export function AutomixBar(automix, { onQueueFromBrowser, performer = null }) {
+  // One button, full show: queue + automix (smart) + performer in one hit.
+  const btnShow = h('button', {
+    class: 'btn btn-show',
+    title: 'Autopilot show: fill the queue, automix on with SMART order, performer riding on top. Hit again to take it all back.',
+    onclick: () => {
+      const on = automix.enabled && performer && performer.enabled;
+      if (on) {
+        if (performer) performer.stop();
+        if (automix.enabled) automix.toggle();
+      } else {
+        if (!automix.queue.length) onQueueFromBrowser();
+        automix.order = 'smart';
+        if (!automix.enabled) automix.toggle();
+        if (performer && !performer.enabled) performer.start();
+      }
+      render();
+    },
+  }, '⚡ SHOW');
+
   const btnPerf = h('button', {
     class: 'btn btn-perf',
     title: 'Performer: bar-synced scratches, loop rolls, FX bursts and blends over the running mix — every gesture undoes itself, and your hand always wins',
@@ -51,10 +70,10 @@ export function AutomixBar(automix, { onQueueFromBrowser, performer = null }) {
   };
   const btnSync = toggle('SYNC', () => automix.syncTempo, (v) => { automix.syncTempo = v; }, 'Pull the next deck onto the BPM before the transition');
 
-  const STYLES = ['auto', 'blend', 'cut', 'echo', 'fade'];
+  const STYLES = ['auto', 'blend', 'cut', 'echo', 'spinback', 'fade'];
   const btnStyle = h('button', {
     class: 'btn btn-mini',
-    title: 'Transition style: AUTO picks per pair · BLEND phrase-aligned bass swap · CUT on the phrase · ECHO tail exit · FADE legacy crossfade',
+    title: 'Transition style: AUTO picks per pair (with a seam budget) · BLEND phrase-aligned bass swap · CUT on the phrase · ECHO tail exit · SPINBACK hard rewind exit · FADE legacy crossfade',
     onclick: () => {
       automix.transitionStyle = STYLES[(STYLES.indexOf(automix.transitionStyle) + 1) % STYLES.length];
       render();
@@ -87,6 +106,7 @@ export function AutomixBar(automix, { onQueueFromBrowser, performer = null }) {
       btnStyle,
       btnSync,
       btnOrder,
+      btnShow,
       btnPerf,
       perfInfo,
     ),
@@ -107,7 +127,7 @@ export function AutomixBar(automix, { onQueueFromBrowser, performer = null }) {
   /** Called each frame; cheap string/width updates only. */
   function tick() {
     const d = automix.describe();
-    if (label.textContent !== d.label) label.textContent = d.label;
+    scrambleTo(label, d.label); // ticker "decrypts" on every state change
     if (detail.textContent !== d.detail) detail.textContent = d.detail;
 
     // The meter fills as the live track approaches its transition point.
@@ -124,6 +144,7 @@ export function AutomixBar(automix, { onQueueFromBrowser, performer = null }) {
     meter.firstChild.style.width = `${pct}%`;
     meter.classList.toggle('hot', Boolean(automix.fade || automix.transition));
 
+    btnShow.classList.toggle('on', automix.enabled && Boolean(performer && performer.enabled));
     if (performer) {
       btnPerf.classList.toggle('on', performer.enabled);
       const info = performer.enabled

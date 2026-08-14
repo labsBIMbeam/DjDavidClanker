@@ -9,7 +9,8 @@ import { MixerStrip } from './ui/mixer.js';
 import { Browser } from './ui/browser.js';
 import { openModal, toast } from './ui/modal.js';
 import { openZapDialog } from './ui/zapmodal.js';
-import { h, clear } from './ui/dom.js';
+import { h, clear, scrambleTo } from './ui/dom.js';
+import { Visualizer } from './ui/visualizer.js';
 import { capabilities, store, getPublicKey, onIdentityChanged, inShell, mediaSession } from './lib/nap.js';
 import { publishSetlist } from './lib/nostr.js';
 import { hexToNpub } from './lib/bech32.js';
@@ -21,10 +22,16 @@ import { createMidi } from './lib/midi.js';
 import logoUrl from './assets/600.png';
 import { camelotScore, bpmFoldScore, energyScore, scoreCandidate, summaryFor } from './audio/selection.js';
 import { trackCacheId, getAnalysis } from './lib/analysiscache.js';
+// `setlist` (below) is the session list published to Nostr; the persistent
+// crate-with-cues from lib/setlist.js rides under `savedSet`.
+import { initSetlist, setlist as savedSet } from './lib/setlist.js';
+import { initLocalSongs, localSongs } from './lib/localsongs.js';
 
 // Warm the analysis cache early — loads race it, and a miss only costs a
 // re-analysis, so fire-and-forget is fine.
 initCache().catch(() => {});
+initSetlist().catch(() => {});
+initLocalSongs().catch(() => {});
 
 const SETTINGS_KEY = 'settings.v1';
 const DEFAULTS = {
@@ -48,6 +55,48 @@ const modeEl = h('span', { class: 'badge' }, inShell() ? 'NAPPLET' : 'STANDALONE
 const onAirText = h('span', { class: 'onair-text' }, 'OFF AIR');
 const onAirChip = h('span', { class: 'onair' }, h('i', { class: 'onair-dot' }), onAirText);
 
+// Set recording: master bus → webm/opus, downloaded on stop.
+const recTime = h('span', { class: 'rec-time' }, '');
+const btnRec = h('button', {
+  class: 'btn btn-mini btn-rec',
+  title: 'Record the master output; stopping downloads the set as a webm file',
+  onclick: async () => {
+    if (mixer.recording) {
+      const blob = await mixer.stopRecording();
+      if (blob) {
+        const url = URL.createObjectURL(blob);
+        const a = h('a', { href: url, download: `clanker-set-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.webm` });
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+        toast('Set recording saved.', 'ok');
+      }
+    } else {
+      mixer.ensureContext();
+      if (mixer.startRecording()) toast('Recording the master — hit ● again to save.', 'ok');
+      else toast('Recording not available here.', 'warn');
+    }
+  },
+}, '● REC');
+
+// Stage view for the beamer: waves + platter clusters only, everything
+// booth-only (browser, settings noise) tucked away. `?stage=1` boots into it.
+// The ZapViz-style visualizer runs behind it — automode only, like Winamp.
+const vis = Visualizer(mixer);
+document.body.appendChild(vis.canvas);
+const applyStage = (on) => {
+  document.body.classList.toggle('stage-view', on);
+  btnStage.classList.toggle('on', on);
+  vis.setActive(on);
+};
+const btnStage = h('button', {
+  class: 'btn btn-mini btn-stage',
+  title: 'Stage view for the second screen: waves, decks and the visualizer — the crowd does not need the browser',
+  onclick: () => applyStage(!document.body.classList.contains('stage-view')),
+}, '⛶ STAGE');
+if (new URLSearchParams(location.search).has('stage')) applyStage(true);
+
 const header = h('header', { class: 'app-head' },
   h('div', { class: 'brand' },
     h('img', { class: 'brand-logo', src: logoUrl, alt: '600' }),
@@ -55,7 +104,7 @@ const header = h('header', { class: 'app-head' },
     h('span', { class: 'brand-sub' }, 'wavlake · v4v · two decks'),
   ),
   onAirChip,
-  h('div', { class: 'head-right' }, modeEl, identityEl,
+  h('div', { class: 'head-right' }, btnStage, btnRec, recTime, modeEl, identityEl,
     h('button', { class: 'btn btn-mini', title: 'Shortcuts & info', onclick: showHelp }, '?'),
   ),
 );
@@ -116,11 +165,22 @@ function audibleDecks() {
   return out;
 }
 
+let lastBeatIdx = -1;
+let wasMixing = false;
+
 function tickWavedeck() {
   const audible = audibleDecks();
   const label = audible.length ? `ON AIR · DECK ${audible.join(' + ')}` : 'OFF AIR';
-  if (onAirText.textContent !== label) onAirText.textContent = label;
+  scrambleTo(onAirText, label); // decrypt-style swap, no-ops while unchanged
   onAirChip.classList.toggle('live', audible.length > 0);
+
+  // Recording chip: red pulse + elapsed time while the master is captured.
+  const rec = mixer.recording;
+  btnRec.classList.toggle('on', Boolean(rec));
+  const recLabel = rec
+    ? `${String(Math.floor((Date.now() - rec.since) / 60000)).padStart(2, '0')}:${String(Math.floor(((Date.now() - rec.since) / 1000) % 60)).padStart(2, '0')}`
+    : '';
+  if (recTime.textContent !== recLabel) recTime.textContent = recLabel;
 
   const live = audible.length ? mixer.decks[audible[0]] : null;
   let beatIdx = -1;
@@ -131,6 +191,22 @@ function tickWavedeck() {
     beatIdx = Math.floor(mod(live.position - anchor, 4 * beat) / beat);
   }
   beatDots.forEach((d, i) => d.classList.toggle('on', i === beatIdx));
+
+  // Bar-one pulse: a short glow ripple through the live platter and the
+  // beat row every time the bar turns over. Pure class-flip — CSS animates.
+  if (beatIdx === 0 && lastBeatIdx !== 0 && live) {
+    deckWrap.classList.remove('bar-one', 'bar-one-a', 'bar-one-b');
+    void deckWrap.offsetWidth; // restart the CSS animation
+    deckWrap.classList.add('bar-one', `bar-one-${live.id.toLowerCase()}`);
+  }
+  lastBeatIdx = beatIdx;
+
+  // Data-storm shimmer while a handover runs — and a fresh visualizer
+  // preset with every scene change, Winamp-style.
+  const mixingNow = Boolean(automix.transition || automix.fade);
+  if (mixingNow && !wasMixing) vis.onTransition();
+  wasMixing = mixingNow;
+  deckWrap.classList.toggle('mixing', mixingNow);
 
   const latched = mixer.decks.A.syncedTo || mixer.decks.B.syncedTo;
   syncChip.classList.toggle('latched', Boolean(latched));
@@ -158,6 +234,12 @@ const browser = Browser({
   onZap: (track) => openZapDialog(track, settings),
   capabilities: caps,
   settings,
+  // ☆ grabs the live marks when the starred track is sitting on a deck.
+  getDeckCues: (trackId) => {
+    const d = [mixer.decks.A, mixer.decks.B]
+      .find((x) => x.track && x.track.id === trackId);
+    return d ? { cue: d.cuePoint || 0, hot: [...d.hotCues] } : null;
+  },
   // Marker/rail source of truth — derived from live deck+automix state, no
   // second store anywhere.
   deckState: () => ({
@@ -247,23 +329,57 @@ for (const id of ['A', 'B']) {
   const deck = mixer.decks[id];
   deck.on((what) => {
     if (what === 'sync-request') {
-      // SYNC is a latch: on = match tempo once, then hold the phase from the
-      // frame loop until it is clicked off again.
+      // SYNC is a latch: on = match tempo once, then bend the phase in from
+      // the frame loop until it is clicked off again. With a tempo master
+      // set, SYNC always pulls THIS deck onto the master — and refuses on
+      // the master itself, so the live tempo can never be yanked by habit.
       if (deck.syncedTo) {
         deck.setSynced(null);
         toast(`SYNC deck ${id} released.`, 'ok');
         return;
       }
-      const other = mixer.decks[id === 'A' ? 'B' : 'A'];
-      if (!other.effectiveBpm) return toast('The other deck has no BPM.', 'warn');
-      const target = other.effectiveBpm;
-      const ok = deck.syncTo(other);
+      if (mixer.syncMaster === id) {
+        return toast(`Deck ${id} IS the tempo master — hit SYNC on the other deck.`, 'warn');
+      }
+      const master = mixer.masterFor(deck);
+      if (!master.effectiveBpm) return toast('The master deck has no BPM.', 'warn');
+      const target = master.effectiveBpm;
+      const ok = deck.syncTo(master);
       const panel = id === 'A' ? panelA : panelB;
       panel.tempoFader.value = String(deck.tempo);
-      if (ok) deck.setSynced(other);
+      if (ok) deck.setSynced(master);
       toast(ok
-        ? `Deck ${id} synced to ${target.toFixed(1)} BPM — phase is being held.`
+        ? `Deck ${id} → master ${master.id} @ ${target.toFixed(1)} BPM — phase riding in.`
         : `Out of reach within the ±${deck.tempoRange}% range.`, ok ? 'ok' : 'warn');
+    }
+    if (what === 'cue') {
+      // Performance marks ride with the setlist: a cue or hot cue set on a
+      // listed track writes straight back (debounced persist inside).
+      const t = deck.track;
+      if (t && savedSet.has(t.id)) {
+        savedSet.updateCues(t.id, { cue: deck.cuePoint || 0, hot: [...deck.hotCues] });
+      }
+    }
+    if (what === 'load') {
+      // A setlist track brings its marks back onto the deck.
+      const t = deck.track;
+      const c = t && savedSet.cuesFor(t.id);
+      if (c) {
+        deck.cuePoint = c.cue || 0;
+        deck.hotCues = [...(c.hot || [null, null, null, null])];
+      }
+    }
+    if (what === 'master-request') {
+      // Toggle this deck as the manual tempo master.
+      const was = mixer.syncMaster;
+      mixer.syncMaster = was === id ? null : id;
+      if (mixer.syncMaster) {
+        // The master itself must not stay latched onto anything.
+        deck.setSynced(null);
+        toast(`Deck ${id} is the tempo master — SYNC pulls the other deck onto it.`, 'ok');
+      } else {
+        toast('Tempo master released — SYNC targets the opposite deck again.', 'ok');
+      }
     }
     if (what === 'drop-request') {
       const other = mixer.decks[id === 'A' ? 'B' : 'A'];
@@ -655,7 +771,7 @@ midi.connect()
 // drivable: dev/live-dj.mjs runs a whole set through this handle.
 window.__djclanker = {
   mixer, decks: mixer.decks, settings, automix, browser, toast, planTransition,
-  preanalyzer, midi, performer,
+  preanalyzer, midi, performer, setlist: savedSet, localSongs, vis,
   selection: { camelotScore, bpmFoldScore, energyScore, scoreCandidate, summaryFor },
   analysisCache: { trackCacheId, getAnalysis },
 };
@@ -676,6 +792,7 @@ function frame(now) {
   strip.tick();
   automixBar.tick();
   tickWavedeck();
+  vis.tick(now);
   if (now - lastBrowserTick > 500) {
     lastBrowserTick = now;
     browser.tick(); // track markers + the UP NEXT rail, 2 Hz is plenty
@@ -696,7 +813,7 @@ requestAnimationFrame(frame);
 let bgTimer = 0;
 let bgLast = 0;
 mixer.bgTicks = 0;
-document.addEventListener('visibilitychange', () => {
+function applyVisibility() {
   if (document.hidden && !bgTimer) {
     bgLast = performance.now();
     bgTimer = setInterval(() => {
@@ -713,7 +830,12 @@ document.addEventListener('visibilitychange', () => {
     bgTimer = 0;
     lastFrame = 0; // the rAF dt restarts clean instead of spanning the gap
   }
-});
+}
+document.addEventListener('visibilitychange', applyVisibility);
+// A page can BOOT hidden (background tab, minimized pane) — visibilitychange
+// never fires then, rAF never runs, and without this call nothing would tick
+// the audio state machines at all.
+applyVisibility();
 
 /* ------------------------------ boot ------------------------------ */
 
