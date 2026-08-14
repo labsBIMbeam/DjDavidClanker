@@ -76,4 +76,29 @@ export const setlist = {
     persist();
     return true;
   },
+
+  /** The saved-to-disk shape — cues included, re-importable. */
+  serialize() {
+    return JSON.stringify({ davidclanker: 'setlist', version: 1, name: data.name, tracks: data.tracks }, null, 2);
+  },
+
+  /**
+   * Merge a parsed setlist file back in (dedupe by id). Returns how many
+   * tracks were new; throws on anything that is not a setlist file.
+   */
+  importTracks(parsed) {
+    if (!parsed || parsed.davidclanker !== 'setlist' || !Array.isArray(parsed.tracks)) {
+      throw new Error('not a setlist file');
+    }
+    let added = 0;
+    for (const t of parsed.tracks) {
+      if (!t || !t.id || this.has(t.id)) continue;
+      data.tracks.push({ ...t, cues: t.cues || EMPTY_CUES() });
+      added++;
+    }
+    // Adopt the file's name only when everything here came from this import.
+    if (parsed.name && data.tracks.length === added) data.name = parsed.name;
+    if (added) persist();
+    return added;
+  },
 };

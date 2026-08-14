@@ -12,6 +12,7 @@ import {
 } from '../lib/discover.js';
 import { camelotFor } from '../audio/analyze.js';
 import { setlist } from '../lib/setlist.js';
+import { localSongs } from '../lib/localsongs.js';
 
 /** "124 · 8B" chip when the track's analysis is cached; null otherwise. */
 function keyBpmChip(t) {
@@ -74,15 +75,18 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckSt
     else if (key === 'crate') showCrateHome();
     else if (key === 'server') showServerHome();
     else if (key === 'discover') showDiscoverHome();
+    else if (key === 'local') showLocal();
     else renderList();
   }
 
+  // 'crate' still exists as an internal view (reached from the ★ side panel);
+  // its slot in the source strip belongs to the local songs now.
   const tabs = [
     ['charts', 'Charts'],
     ['search', 'Search'],
     ['server', 'Server'],
     ['discover', 'Discover'],
-    ['crate', 'Crate'],
+    ['local', 'Local'],
     ['nostr', 'Nostr'],
   ].map(([key, label]) =>
     h('button', { class: 'tab', onclick: () => openTab(key) }, label),
@@ -95,9 +99,9 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckSt
 
   const modeSetlist = h('button', {
     class: 'mode-btn mode-setlist',
-    title: 'Your set, in order — every entry remembers its cue and hot cues',
+    title: 'Your set in order (every entry remembers its cue and hot cues) plus the crate — playlist, saved artists and albums — in the side panel',
     onclick: () => showSetlist(),
-  }, '★ SETLIST');
+  }, '★ SET & CRATE');
   const modeSources = h('button', {
     class: 'mode-btn',
     title: 'Track sources: charts, search, your server, discovery, crate, Nostr',
@@ -262,28 +266,56 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckSt
     for (const t of tracks) {
       if (t && t.localFile && !localList.some((x) => x.title === t.title && x.artist === t.artist)) {
         localList.push(t);
+        localSongs.remember(t); // the catalog survives reloads; the File does not
       }
     }
     renderSide();
   }
 
+  /** Session tracks first (playable), then remembered-only catalog ghosts. */
   function showLocal() {
-    setItems([...localList], 'Local files', `${localList.length} this session — they stay on your machine, no upload`);
+    const live = (s) => localList.some((x) => x.localFile.name === s.name && x.localFile.size === s.size);
+    const ghosts = localSongs.all
+      .filter((s) => !live(s))
+      .map((s) => ({
+        id: `localcat-${s.name}-${s.size}`,
+        title: s.title,
+        artist: s.artist,
+        duration: s.duration || 0,
+        streamUrls: [],
+        localGhost: true,
+      }));
+    setItems([...localList, ...ghosts], 'Local songs',
+      `${localList.length} loaded this session · ${ghosts.length} remembered — re-import (📁) to re-arm`);
     renderList();
   }
 
   const localInput = h('input', {
     class: 'local-input',
     type: 'file',
-    accept: 'audio/*,.mp3,.wav,.flac,.ogg,.m4a',
+    accept: 'audio/*,.mp3,.wav,.flac,.ogg,.m4a,.json',
     multiple: true,
     style: { display: 'none' },
-    onchange: () => {
+    onchange: async () => {
       const files = [...localInput.files];
-      if (!files.length) return;
-      addLocalTracks(files.map(trackFromFile));
-      showLocal();
       localInput.value = '';
+      if (!files.length) return;
+      // setlist.json files re-import a saved set (cues included).
+      const jsons = files.filter((f) => /\.json$/i.test(f.name));
+      for (const f of jsons) {
+        try {
+          const parsed = JSON.parse(await f.text());
+          const added = setlist.importTracks(parsed);
+          error = '';
+          sub = `Setlist import: ${added} new track(s) merged.`;
+        } catch {
+          error = `Not a setlist file: ${f.name}`;
+        }
+      }
+      const audio = files.filter((f) => !/\.json$/i.test(f.name));
+      if (audio.length) addLocalTracks(audio.map(trackFromFile));
+      if (jsons.length && !audio.length) showSetlist();
+      else openTab('local');
     },
   });
   const btnLocal = h('button', {
@@ -475,9 +507,13 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckSt
   }
 
   function trackRow(t, index) {
+    // Catalog ghosts (remembered local songs whose File is gone after a
+    // reload) render greyed: nothing to decode until the file comes back.
+    const ghost = Boolean(t.localGhost);
     const toDeck = (id) => h('button', {
       class: `btn btn-load load-${id.toLowerCase()}`,
-      title: `Load into deck ${id}`,
+      title: ghost ? 'Re-import the file (📁) to make it playable again' : `Load into deck ${id}`,
+      disabled: ghost,
       onclick: (e) => { e.stopPropagation(); onLoadDeck(id, t); maybeAutoPromote(t); },
     }, id);
     const btnA = toDeck('A');
@@ -486,12 +522,13 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckSt
     const marker = h('span', { class: 'row-marker' }, '');
 
     // ☆ puts the track (with the deck's current marks, if loaded) into the
-    // setlist; ★ takes it out again. In setlist mode the row instead carries
-    // its running-order controls and the stored marks.
-    const inSetlist = mode === 'setlist';
+    // setlist; ★ takes it out again. In the ★ list itself the row instead
+    // carries its running-order controls and the stored marks.
+    const inSetlist = mode === 'setlist' && heading.startsWith('★');
     const star = h('button', {
       class: `btn btn-mini row-star ${setlist.has(t.id) ? 'on' : ''}`,
       title: setlist.has(t.id) ? 'Remove from the setlist' : 'Into the setlist — cue + hot cues ride along',
+      disabled: ghost,
       onclick: (e) => {
         e.stopPropagation();
         if (setlist.has(t.id)) {
@@ -643,6 +680,22 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckSt
           },
         }, '+ all → playlist'));
       }
+      if (mode === 'setlist') {
+        // Save the set — cues included — as a local file. Re-import via 📁.
+        headEl.appendChild(h('button', {
+          class: 'btn btn-mini btn-saveset',
+          title: 'Save the setlist (with its cue points) as a JSON file on this machine',
+          onclick: () => {
+            const blob = new Blob([setlist.serialize()], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = h('a', { href: url, download: 'setlist.json' });
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 4000);
+          },
+        }, '⤓ save'));
+      }
     }
     clear(list);
     if (!items.length && !busy) {
@@ -715,12 +768,73 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckSt
     }
   }
 
+  // The crate side panel: playlist chips, saved artist/album sources, local
+  // shortcuts. Shown for the internal 'crate' view AND as the ★ SET & CRATE
+  // sidebar — crate and setlist are one place now.
+  function renderCrateSide() {
+    const trackEntries = crate.filter((c) => c.type === 'track');
+    const g = h('div', { class: 'side-group' }, h('div', { class: 'side-h' }, `Playlist (${trackEntries.length})`));
+    if (!trackEntries.length) {
+      g.appendChild(h('div', { class: 'muted' }, 'Empty. In any list, "+" drops a track here, "+ all" the whole list.'));
+    } else {
+      for (const c of trackEntries) {
+        g.appendChild(h('div', { class: 'crate-row' },
+          chip(`♪ ${c.name}`, showPlaylist),
+          h('button', {
+            class: 'btn btn-mini', title: 'Remove',
+            onclick: async () => { await removeFromCrate(c); if (heading === 'Playlist') showPlaylist(); },
+          }, '×'),
+        ));
+      }
+      g.appendChild(h('button', { class: 'btn btn-ghost', onclick: showPlaylist }, 'Show playlist'));
+    }
+    sideEl.appendChild(g);
+
+    const sources = crate.filter((c) => c.type !== 'track');
+    const g2 = h('div', { class: 'side-group' }, h('div', { class: 'side-h' }, 'Sources'));
+    if (!sources.length) {
+      g2.appendChild(h('div', { class: 'muted' }, 'Save artists/albums from search with "+ Crate".'));
+    } else {
+      for (const c of sources) {
+        g2.appendChild(h('div', { class: 'crate-row' },
+          chip(`${c.type === 'artist' ? '👤' : '💿'} ${c.name}`, () => (c.type === 'artist' ? openArtist(c) : openAlbum(c))),
+          h('button', { class: 'btn btn-mini', title: 'Remove', onclick: () => removeFromCrate(c) }, '×'),
+        ));
+      }
+      g2.appendChild(h('button', {
+        class: 'btn btn-ghost',
+        onclick: () => guard(async () => {
+          const all = [];
+          for (const c of sources) {
+            const t = c.type === 'artist' ? await wl.artistTracks(c.id) : await wl.albumTracks(c.id);
+            all.push(...t);
+          }
+          setItems(all, 'All sources', `${all.length} tracks from ${sources.length} entries`);
+        }, 'Crate'),
+      }, 'Load all'));
+    }
+    sideEl.appendChild(g2);
+
+    if (localList.length) {
+      const g3 = h('div', { class: 'side-group' }, h('div', { class: 'side-h' }, `Local files (${localList.length})`));
+      for (const t of localList.slice(0, 20)) {
+        g3.appendChild(chip(`📁 ${t.title}`, () => openTab('local')));
+      }
+      g3.appendChild(h('button', { class: 'btn btn-ghost', onclick: () => openTab('local') }, 'Show local files'));
+      sideEl.appendChild(g3);
+    }
+  }
+
   function renderSide() {
     for (let i = 0; i < tabs.length; i++) {
-      const key = ['charts', 'search', 'server', 'discover', 'crate', 'nostr'][i];
-      tabs[i].classList.toggle('on', key === tab);
+      const key = ['charts', 'search', 'server', 'discover', 'local', 'nostr'][i];
+      tabs[i].classList.toggle('on', key === tab && mode === 'sources');
     }
     clear(sideEl);
+    if (mode === 'setlist') {
+      renderCrateSide();
+      return;
+    }
     if (tab === 'charts') {
       sideEl.appendChild(h('div', { class: 'side-group' },
         h('div', { class: 'side-h' }, 'Lists'),
@@ -745,57 +859,14 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckSt
       ));
       if (sideEl._searchExtra) sideEl.appendChild(sideEl._searchExtra);
     } else if (tab === 'crate') {
-      const trackEntries = crate.filter((c) => c.type === 'track');
-      const g = h('div', { class: 'side-group' }, h('div', { class: 'side-h' }, `Playlist (${trackEntries.length})`));
-      if (!trackEntries.length) {
-        g.appendChild(h('div', { class: 'muted' }, 'Empty. In any list, "+" drops a track here, "+ all" the whole list.'));
-      } else {
-        for (const c of trackEntries) {
-          g.appendChild(h('div', { class: 'crate-row' },
-            chip(`♪ ${c.name}`, showPlaylist),
-            h('button', {
-              class: 'btn btn-mini', title: 'Remove',
-              onclick: async () => { await removeFromCrate(c); if (heading === 'Playlist') showPlaylist(); },
-            }, '×'),
-          ));
-        }
-        g.appendChild(h('button', { class: 'btn btn-ghost', onclick: showPlaylist }, 'Show playlist'));
-      }
-      sideEl.appendChild(g);
-
-      const sources = crate.filter((c) => c.type !== 'track');
-      const g2 = h('div', { class: 'side-group' }, h('div', { class: 'side-h' }, 'Sources'));
-      if (!sources.length) {
-        g2.appendChild(h('div', { class: 'muted' }, 'Save artists/albums from search with "+ Crate".'));
-      } else {
-        for (const c of sources) {
-          g2.appendChild(h('div', { class: 'crate-row' },
-            chip(`${c.type === 'artist' ? '👤' : '💿'} ${c.name}`, () => (c.type === 'artist' ? openArtist(c) : openAlbum(c))),
-            h('button', { class: 'btn btn-mini', title: 'Remove', onclick: () => removeFromCrate(c) }, '×'),
-          ));
-        }
-        g2.appendChild(h('button', {
-          class: 'btn btn-ghost',
-          onclick: () => guard(async () => {
-            const all = [];
-            for (const c of sources) {
-              const t = c.type === 'artist' ? await wl.artistTracks(c.id) : await wl.albumTracks(c.id);
-              all.push(...t);
-            }
-            setItems(all, 'All sources', `${all.length} tracks from ${sources.length} entries`);
-          }, 'Crate'),
-        }, 'Load all'));
-      }
-      sideEl.appendChild(g2);
-
-      if (localList.length) {
-        const g3 = h('div', { class: 'side-group' }, h('div', { class: 'side-h' }, `Local files (${localList.length})`));
-        for (const t of localList.slice(0, 20)) {
-          g3.appendChild(chip(`📁 ${t.title}`, showLocal));
-        }
-        g3.appendChild(h('button', { class: 'btn btn-ghost', onclick: showLocal }, 'Show local files'));
-        sideEl.appendChild(g3);
-      }
+      renderCrateSide();
+    } else if (tab === 'local') {
+      sideEl.appendChild(h('div', { class: 'side-group' },
+        h('div', { class: 'side-h' }, 'Local songs'),
+        chip('📁 Import files…', () => localInput.click()),
+        h('div', { class: 'muted' },
+          `${localSongs.all.length} remembered. Files themselves cannot persist in the sandbox — re-import (same name+size) re-arms an entry; ⤴ into the crate is the permanent road.`),
+      ));
     } else if (tab === 'server') {
       const ok = subsonicConfigured(settings);
       sideEl.appendChild(h('div', { class: 'side-group' },

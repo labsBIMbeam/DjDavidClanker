@@ -415,8 +415,7 @@ html, body {
 .mode-btn.on { color: #f7931a; border-color: #f7931a; }
 .mode-btn.mode-setlist.on { color: #ff6a00; border-color: #ff6a00; box-shadow: 0 0 8px rgba(255, 106, 0, 0.3); }
 .browser.setlist-mode .browser-tabs { display: none; }
-.browser.setlist-mode .browser-side { display: none; }
-.browser.setlist-mode .browser-main { grid-template-columns: 1fr 280px; }
+/* SET & CRATE: the side panel stays — it carries the crate half. */
 .row-star.on { color: #ff6a00; border-color: #ff6a00; }
 .cue-badge {
   font-family: var(--mono); font-size: 10px; color: #ffa733;

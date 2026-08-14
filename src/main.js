@@ -24,11 +24,13 @@ import { trackCacheId, getAnalysis } from './lib/analysiscache.js';
 // `setlist` (below) is the session list published to Nostr; the persistent
 // crate-with-cues from lib/setlist.js rides under `savedSet`.
 import { initSetlist, setlist as savedSet } from './lib/setlist.js';
+import { initLocalSongs, localSongs } from './lib/localsongs.js';
 
 // Warm the analysis cache early — loads race it, and a miss only costs a
 // re-analysis, so fire-and-forget is fine.
 initCache().catch(() => {});
 initSetlist().catch(() => {});
+initLocalSongs().catch(() => {});
 
 const SETTINGS_KEY = 'settings.v1';
 const DEFAULTS = {
@@ -699,7 +701,7 @@ midi.connect()
 // drivable: dev/live-dj.mjs runs a whole set through this handle.
 window.__djclanker = {
   mixer, decks: mixer.decks, settings, automix, browser, toast, planTransition,
-  preanalyzer, midi, performer, setlist: savedSet,
+  preanalyzer, midi, performer, setlist: savedSet, localSongs,
   selection: { camelotScore, bpmFoldScore, energyScore, scoreCandidate, summaryFor },
   analysisCache: { trackCacheId, getAnalysis },
 };

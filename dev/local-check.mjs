@@ -58,7 +58,7 @@ await frame.locator('input.local-input').setInputFiles({
   mimeType: 'audio/wav',
   buffer: makeWav(),
 });
-await frame.locator('.browser-h1', { hasText: 'Local files' }).waitFor({ timeout: 10000 });
+await frame.locator('.browser-h1', { hasText: 'Local songs' }).waitFor({ timeout: 10000 });
 const rows = await frame.locator('.track-row').count();
 check('local file appears as a row', rows === 1, `${rows} row(s)`);
 const title = (await frame.locator('.track-row .row-title').first().textContent()).trim();
@@ -97,12 +97,36 @@ await frame.locator('input.local-input').setInputFiles({
   mimeType: 'audio/wav',
   buffer: makeWav(2),
 });
-await frame.locator('.browser-h2', { hasText: '2 this session' }).waitFor({ timeout: 10000 });
+await frame.locator('.browser-h2', { hasText: '2 loaded this session' }).waitFor({ timeout: 10000 });
 const localRows = await frame.locator('.track-row').count();
 check('local file list accumulates across picks', localRows === 2, `${localRows} rows`);
-await frame.locator('.tab', { hasText: 'Crate' }).click();
+
+// The catalog remembers imports (metadata survives reloads), and an entry
+// with no live File renders as a disabled ghost row.
+const cat = await frame.evaluate(async () => {
+  const dj = window.__djclanker;
+  const remembered = dj.localSongs.all.length;
+  dj.localSongs.remember({
+    title: 'Ghost Tune', artist: 'Past Session',
+    localFile: { name: 'ghost.wav', size: 12345 }, duration: 90,
+  });
+  document.querySelectorAll('.tab')[4].click(); // Local re-render
+  await new Promise((r) => setTimeout(r, 200));
+  const rows = [...document.querySelectorAll('.track-row')];
+  const ghost = rows.find((r) => r.textContent.includes('Ghost Tune'));
+  return {
+    remembered,
+    rows: rows.length,
+    ghostDisabled: ghost ? ghost.querySelector('.load-a').disabled : null,
+  };
+});
+check('local catalog remembers every import', cat.remembered === 2, `${cat.remembered} remembered`);
+check('remembered-only entries render as disabled ghosts',
+  cat.rows === 3 && cat.ghostDisabled === true, JSON.stringify(cat));
+
+await frame.locator('.mode-setlist').click();
 const localChips = await frame.locator('.side-group .chip', { hasText: '📁' }).count();
-check('crate tab lists the session local files', localChips === 2, `${localChips} chips`);
+check('SET & CRATE side lists the session local files', localChips === 2, `${localChips} chips`);
 
 await page.screenshot({ path: `${OUT}-deck.png`, fullPage: true });
 await browser.close();

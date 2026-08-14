@@ -178,7 +178,7 @@ await frame.evaluate(() => {
   B.syncTo(A);
   B.setSynced(A);
 });
-await page.waitForTimeout(6500);
+await page.waitForTimeout(8500);
 const sync = await frame.evaluate(() => {
   const { A, B } = window.__djclanker.decks;
   const mod = (x, m) => ((x % m) + m) % m;

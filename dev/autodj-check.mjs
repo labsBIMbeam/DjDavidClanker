@@ -631,8 +631,8 @@ check('order button reflects the SMART default', ui.orderLabel === 'SMART',
   `${ui.orderLabel}`);
 
 // Cached tracks get a "BPM · key" chip once the list re-renders.
-await frame.locator('.tab', { hasText: 'Crate' }).click();
-await frame.locator('.side-group .btn-ghost', { hasText: 'Show local files' }).click();
+await frame.locator('.tab', { hasText: 'Local' }).click();
+await frame.locator('.browser-h1', { hasText: 'Local songs' }).waitFor({ timeout: 10000 });
 const chip = await frame.evaluate(() => {
   const rows = [...document.querySelectorAll('.track-row')];
   const alpha = rows.find((r) => r.textContent.includes('Alpha'));

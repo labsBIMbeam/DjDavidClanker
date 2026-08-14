@@ -117,12 +117,19 @@ network access to a host shell.
   music steps up), every gesture records its own undo, and anything a human
   touches is released instantly
 
-**Setlist**
-- **★ SETLIST** sits one level above the sources: your own ordered crate
-  for the night. ☆ on any row puts the track there — and its performance
-  marks (cue point + four hot cues) ride along: set a hot cue on a listed
-  track and it is stored; load the track later and the marks come back
-  onto the deck. Reorder with ▲▼, persisted via the storage domain
+**Set & crate**
+- **★ SET & CRATE** sits one level above the sources: the setlist — your
+  ordered crate for the night — as the list, and the crate (playlist,
+  saved artists/albums, local shortcuts) in the side panel. ☆ on any row
+  puts a track into the set, and its performance marks (cue point + four
+  hot cues) ride along: set a hot cue on a listed track and it is stored;
+  load it later and the marks come back onto the deck. Reorder with ▲▼
+- **⤓ save** writes the setlist — cues included — as `setlist.json` on
+  your machine; drop the file back on 📁 and it merges in again
+- The **Local** source tab is the home of every imported file: session
+  tracks are playable, remembered-only entries (the catalog survives
+  reloads, file handles cannot) sit greyed until a re-import with the same
+  name+size re-arms them — ⤴ into the crate stays the permanent road
 
 **Sources**
 - **Wavlake** charts/search/genres (value4value — zap the artist while it

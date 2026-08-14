@@ -1,6 +1,6 @@
 # Handoff — DJ David Clanker
 
-As of: August 14, 2026 · Status: **working, 215 E2E checks across 9 suites + 9 pytest green**
+As of: August 14, 2026 · Status: **working, 218 E2E checks across 9 suites + 9 pytest green**
 
 This document is for the person who touches the project next — whether that's
 you in three months or someone else. It describes what is built, **why it is
@@ -623,7 +623,8 @@ Interactions with non-obvious behavior:
 | Auto-scratch (dropdown + SCRATCH button) | scripted turntablism over the granular platter (`src/audio/autoscratch.js`, ported from PR #8): 20 patterns in Foundation/Cuts/Clicks families. The dropdown ARMS a move (`deck.scratchChoice`, survives loads); the SCRATCH button — and the top MIDI pad row — throws it, loops until tapped off, and a repick mid-scratch swaps at the next cycle boundary. Record motion is analytic (no drift, cycles return to the anchor — except backspin, which is `free`), the fader gates are sample-accurate ramps on the per-deck `scratchGate` node, offset by `GRAIN_LATENCY` so clicks land on what the grain queue is actually playing. The one sanctioned timer in the app (5 ms) — gates schedule against the audio clock and must survive a hidden tab |
 | ✦ PERFORM (automix bar) | bar-synced performer (`src/audio/performer.js`, ported from PR #8): per-track mood (weighted toward calm) rolls gestures — scratch bursts, loop rolls, FX bursts, filter sweeps, band isolation, fader chops, blends. Every gesture registers an undo that fires when its bars expire or a human touches the deck; crossfader gestures stand down while the automix runs a handover. Mood + last action read out next to the button |
 | "+" on a track row / "+ all → playlist" above the list | adds the track(s) to the playlist (Crate tab). There: a menu of all entries, × removes, "Show playlist" renders it as a loadable list |
-| ★ SETLIST (mode row above the source tabs) | the DJ's own ordered crate (`src/lib/setlist.js`, blob `setlist.v1`). ☆ on any row adds the track — with the deck's CURRENT marks when it is loaded; setting a cue or hot cue on a listed track writes back live (debounced persist); loading a listed track restores its marks onto the deck. In setlist mode rows carry ▲▼ running-order controls and a marks badge; the source tabs hide (they are one level below) |
+| ★ SET & CRATE (mode row above the source tabs) | set and crate are ONE place: the setlist (`src/lib/setlist.js`, blob `setlist.v1`) as the list, the crate side panel (playlist chips, saved artists/albums, local shortcuts) beside it. ☆ on any row adds a track — with the deck's CURRENT marks when it is loaded; cue/hot-cue changes on listed tracks write back live (debounced persist); loading a listed track restores its marks. The ★ list's rows carry ▲▼ running-order controls and a marks badge; the source tabs hide (one level below). ⤓ save downloads `setlist.json` (cues included; needs `allow-downloads` on the frame — the dev shell grants it), and 📁 re-imports it (merge, dedupe by id) |
+| Local source tab | home of every imported file (`src/lib/localsongs.js`, blob `localsongs.v1`): session tracks playable, remembered-only catalog entries as greyed ghosts — File handles cannot persist in the sandbox, a re-import with the same name+size re-arms them. The Crate slot in the strip belongs to Local now; the crate itself lives under ★ |
 
 ---
 
