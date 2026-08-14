@@ -2,6 +2,25 @@ import { h, fader } from './dom.js';
 
 /** Control strip for the Automix: on/off, skip, fade length, sync, shuffle. */
 export function AutomixBar(automix, { onQueueFromBrowser, performer = null }) {
+  // One button, full show: queue + automix (smart) + performer in one hit.
+  const btnShow = h('button', {
+    class: 'btn btn-show',
+    title: 'Autopilot show: fill the queue, automix on with SMART order, performer riding on top. Hit again to take it all back.',
+    onclick: () => {
+      const on = automix.enabled && performer && performer.enabled;
+      if (on) {
+        if (performer) performer.stop();
+        if (automix.enabled) automix.toggle();
+      } else {
+        if (!automix.queue.length) onQueueFromBrowser();
+        automix.order = 'smart';
+        if (!automix.enabled) automix.toggle();
+        if (performer && !performer.enabled) performer.start();
+      }
+      render();
+    },
+  }, '⚡ SHOW');
+
   const btnPerf = h('button', {
     class: 'btn btn-perf',
     title: 'Performer: bar-synced scratches, loop rolls, FX bursts and blends over the running mix — every gesture undoes itself, and your hand always wins',
@@ -87,6 +106,7 @@ export function AutomixBar(automix, { onQueueFromBrowser, performer = null }) {
       btnStyle,
       btnSync,
       btnOrder,
+      btnShow,
       btnPerf,
       perfInfo,
     ),
@@ -124,6 +144,7 @@ export function AutomixBar(automix, { onQueueFromBrowser, performer = null }) {
     meter.firstChild.style.width = `${pct}%`;
     meter.classList.toggle('hot', Boolean(automix.fade || automix.transition));
 
+    btnShow.classList.toggle('on', automix.enabled && Boolean(performer && performer.enabled));
     if (performer) {
       btnPerf.classList.toggle('on', performer.enabled);
       const info = performer.enabled

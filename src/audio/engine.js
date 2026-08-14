@@ -1594,6 +1594,49 @@ export class Mixer extends Emitter {
     this.emit('crossfader');
   }
 
+  /* ---------------------------- recording ---------------------------- */
+
+  /**
+   * Record the master bus (post master gain, pre device) into a webm/opus
+   * blob. One recorder at a time; stop() resolves the finished Blob.
+   */
+  startRecording() {
+    if (!this.ctx || this._rec) return false;
+    try {
+      const dest = this.ctx.createMediaStreamDestination();
+      this.masterGain.connect(dest);
+      const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus' : 'audio/webm';
+      const rec = new MediaRecorder(dest.stream, { mimeType: mime, audioBitsPerSecond: 192000 });
+      const chunks = [];
+      rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+      rec.start(1000);
+      this._rec = { rec, dest, chunks, startedAt: Date.now() };
+      this.emit('recording');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  get recording() {
+    return this._rec ? { since: this._rec.startedAt } : null;
+  }
+
+  stopRecording() {
+    const r = this._rec;
+    if (!r) return Promise.resolve(null);
+    this._rec = null;
+    return new Promise((resolve) => {
+      r.rec.onstop = () => {
+        try { this.masterGain.disconnect(r.dest); } catch { /* already gone */ }
+        this.emit('recording');
+        resolve(new Blob(r.chunks, { type: r.rec.mimeType }));
+      };
+      try { r.rec.stop(); } catch { resolve(null); }
+    });
+  }
+
   setMaster(v) {
     this.master = clamp(v, 0, 1);
     if (this.masterGain) this.masterGain.gain.value = this.master;

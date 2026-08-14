@@ -378,6 +378,34 @@ const realErrors = errors.filter(
 );
 check('no console errors', realErrors.length === 0, realErrors.slice(0, 3).join(' | '));
 
+// Master-bus set recording: a couple of seconds must land as real bytes.
+const rec = await frame.evaluate(async () => {
+  const dj = window.__djclanker;
+  const m = dj.mixer;
+  m.ensureContext();
+  // Opus squeezes silence to nothing — record actual programme material.
+  const A = dj.decks.A;
+  const wasPlaying = A.playing;
+  if (m.resumeAudio) m.resumeAudio();
+  if (m.ctx && m.ctx.state !== 'running') await m.ctx.resume().catch(() => {});
+  const xfBefore = m.crossfader;
+  m.setCrossfader(-1); // deck A must actually reach the master bus
+  if (A.status === 'ready' && !A.playing) A.toggle();
+  const started = m.startRecording();
+  await new Promise((r) => setTimeout(r, 2200));
+  const active = Boolean(m.recording);
+  const playing = A.playing;
+  const blob = await m.stopRecording();
+  if (!wasPlaying && A.playing) A.pause();
+  m.setCrossfader(xfBefore);
+  return {
+    started, active, bytes: blob ? blob.size : 0, stopped: !m.recording,
+    playing, ctxState: m.ctx ? m.ctx.state : 'none', deck: A.status,
+  };
+});
+check('set recording captures the master bus', rec.started && rec.active && rec.stopped && rec.bytes > 5000,
+  JSON.stringify(rec));
+
 await browser.close();
 
 const failed = results.filter((r) => !r.ok);

@@ -1,6 +1,6 @@
 # Handoff — DJ David Clanker
 
-As of: August 14, 2026 · Status: **working, 219 E2E checks across 9 suites + 9 pytest green**
+As of: August 14, 2026 · Status: **working, 222 E2E checks across 9 suites + 9 pytest green**
 
 This document is for the person who touches the project next — whether that's
 you in three months or someone else. It describes what is built, **why it is
@@ -615,7 +615,9 @@ Interactions with non-obvious behavior:
 | Cue bridge gate | the second AudioContext stays muted until the cue device differs from the master device — same-device output would double-play with a few ms offset and comb-filter the bass away |
 | LINE IN (bottom bar) | a live input (virtual cable, phone, turntable preamp) as a third channel into the master: gain fader + L bass-kill. A MediaStream cannot seek/scratch/analyze, so it is deliberately a channel, not a deck. Browser processing (AGC etc.) is off. Needs media permission — devices-mode shell or standalone; the button turns red where the sandbox refuses |
 | Waveform | always a playhead-centered zoom window (default ×8, wheel or −/+ for ×2–×64, the ×8 label resets; the beat row zooms both lanes together). Drag scrubs — slide the wave under the fixed playhead, seeks rate-limited to ~30/s — a plain click still jumps to the time under the cursor. The overview strip seeks on click. Bar-1 lines are stronger and anchored to the detected downbeat. Double-click on a track row loads into Deck A |
-| HOT CUES (1–4) | empty pad stores the current position, set pad jumps (and fires from stop, CDJ-style); double-click clears. Session-scoped, cleared on load |
+| HOT CUES (1–4) | empty pad stores the current position, set pad jumps (and fires from stop, CDJ-style); double-click clears. Cleared on load — unless the track is in the setlist, which restores its stored marks. Drawn as numbered ember pins on the zoom wave + ticks on the overview |
+| ● REC (header) | records the master bus (post master gain) via MediaStreamDestination + MediaRecorder, webm/opus at 192 kbps; the button pulses with elapsed time, stopping downloads the file. Opus squashes silence — the smoke check plays a deck through it for that reason |
+| ⚡ SHOW (automix bar) | the autopilot: fills the queue when empty, automix on with SMART order, performer on top. Again = everything stands down |
 | Track markers (browser rows) | every row carries its live state: ON AIR · A/B (audible deck), DECK A/B (loaded), QUEUE n (position in the automix queue), PLAYED — plus the matching row tint |
 | UP NEXT rail | right of the track list: the next three queue entries as cards (Q1 highlighted), "+ QUEUE FROM LIST" fills the queue from the current view |
 | DROP (keys 3/4) | starts the deck sample-accurately on the other deck's next bar-1 — tempo synced beforehand, own entry point = cue snapped to its own 1, CDJ start without vinyl spin-up. Pressing again aborts |

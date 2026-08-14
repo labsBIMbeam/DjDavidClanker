@@ -54,6 +54,31 @@ const modeEl = h('span', { class: 'badge' }, inShell() ? 'NAPPLET' : 'STANDALONE
 const onAirText = h('span', { class: 'onair-text' }, 'OFF AIR');
 const onAirChip = h('span', { class: 'onair' }, h('i', { class: 'onair-dot' }), onAirText);
 
+// Set recording: master bus → webm/opus, downloaded on stop.
+const recTime = h('span', { class: 'rec-time' }, '');
+const btnRec = h('button', {
+  class: 'btn btn-mini btn-rec',
+  title: 'Record the master output; stopping downloads the set as a webm file',
+  onclick: async () => {
+    if (mixer.recording) {
+      const blob = await mixer.stopRecording();
+      if (blob) {
+        const url = URL.createObjectURL(blob);
+        const a = h('a', { href: url, download: `clanker-set-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.webm` });
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+        toast('Set recording saved.', 'ok');
+      }
+    } else {
+      mixer.ensureContext();
+      if (mixer.startRecording()) toast('Recording the master — hit ● again to save.', 'ok');
+      else toast('Recording not available here.', 'warn');
+    }
+  },
+}, '● REC');
+
 const header = h('header', { class: 'app-head' },
   h('div', { class: 'brand' },
     h('img', { class: 'brand-logo', src: logoUrl, alt: '600' }),
@@ -61,7 +86,7 @@ const header = h('header', { class: 'app-head' },
     h('span', { class: 'brand-sub' }, 'wavlake · v4v · two decks'),
   ),
   onAirChip,
-  h('div', { class: 'head-right' }, modeEl, identityEl,
+  h('div', { class: 'head-right' }, btnRec, recTime, modeEl, identityEl,
     h('button', { class: 'btn btn-mini', title: 'Shortcuts & info', onclick: showHelp }, '?'),
   ),
 );
@@ -127,6 +152,14 @@ function tickWavedeck() {
   const label = audible.length ? `ON AIR · DECK ${audible.join(' + ')}` : 'OFF AIR';
   if (onAirText.textContent !== label) onAirText.textContent = label;
   onAirChip.classList.toggle('live', audible.length > 0);
+
+  // Recording chip: red pulse + elapsed time while the master is captured.
+  const rec = mixer.recording;
+  btnRec.classList.toggle('on', Boolean(rec));
+  const recLabel = rec
+    ? `${String(Math.floor((Date.now() - rec.since) / 60000)).padStart(2, '0')}:${String(Math.floor(((Date.now() - rec.since) / 1000) % 60)).padStart(2, '0')}`
+    : '';
+  if (recTime.textContent !== recLabel) recTime.textContent = recLabel;
 
   const live = audible.length ? mixer.decks[audible[0]] : null;
   let beatIdx = -1;

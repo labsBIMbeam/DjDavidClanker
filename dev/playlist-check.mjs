@@ -102,9 +102,14 @@ const set = await frame.evaluate(async () => {
   A.seek(2); A.cue(); // cue point at 2 s (deck is paused after load)
   A.seek(4); A.hotCue(1);
   // Find the loaded track's row by its DECK A marker — indexes shifted
-  // after the removal check above.
-  const row = [...document.querySelectorAll('.track-row')]
-    .find((r) => (r.querySelector('.row-marker') || {}).textContent === 'DECK A');
+  // after the removal check above, and the marker pass runs at 2 Hz, so
+  // poll briefly for it after the fresh render.
+  let row = null;
+  for (let i = 0; i < 20 && !row; i++) {
+    row = [...document.querySelectorAll('.track-row')]
+      .find((r) => (r.querySelector('.row-marker') || {}).textContent === 'DECK A');
+    if (!row) await new Promise((r2) => setTimeout(r2, 250));
+  }
   row.querySelector('.row-star').click();
   const stored = dj.setlist.cuesFor(id);
   A.seek(6); A.hotCue(2); // write-back AFTER starring

@@ -916,6 +916,20 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
       ctx2d.fillRect(cx - 5, 0, 10, 5);
     }
 
+    // Hot cues: numbered ember pins — the setlist's stored marks live here.
+    ctx2d.font = 'bold 9px "JetBrains Mono", monospace';
+    ctx2d.textAlign = 'center';
+    for (let i = 0; i < deck.hotCues.length; i++) {
+      const hc = deck.hotCues[i];
+      if (hc == null || hc < t0 || hc > t0 + span) continue;
+      const hx = x(hc);
+      ctx2d.fillStyle = '#ff6a00';
+      ctx2d.fillRect(hx - 1, 0, 2, hgt);
+      ctx2d.fillRect(hx - 6, 0, 13, 11);
+      ctx2d.fillStyle = '#12100d';
+      ctx2d.fillText(String(i + 1), hx + 0.5, 8.5);
+    }
+
     ctx2d.fillStyle = '#fff';
     if (deck.playing) {
       ctx2d.shadowColor = '#f7931a';
@@ -947,6 +961,11 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
     if (deck.cuePoint > 0) {
       g.fillStyle = '#ffd23f';
       g.fillRect(x(deck.cuePoint) - 1, 0, 2, hgt);
+    }
+    // Hot-cue ticks on the whole-track strip.
+    g.fillStyle = '#ff6a00';
+    for (const hc of deck.hotCues) {
+      if (hc != null) g.fillRect(x(hc) - 1, 0, 2, hgt);
     }
     g.fillStyle = '#fff';
     g.fillRect(x(deck.position) - 1, 0, 2, hgt);

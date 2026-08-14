@@ -118,6 +118,25 @@ await frame.evaluate(() => {
   am.mixer.decks.B.pause();
 });
 
+// ⚡ SHOW: one button arms the whole autopilot, one more takes it back.
+await frame.locator('.btn-show').click();
+await page.waitForTimeout(300);
+const showOn = await frame.evaluate(() => {
+  const dj = window.__djclanker;
+  return dj.automix.enabled && dj.performer.enabled && dj.automix.order === 'smart';
+});
+check('SHOW arms automix (smart) + performer together', showOn === true);
+await frame.locator('.btn-show').click();
+await page.waitForTimeout(300);
+const showOff = await frame.evaluate(() => {
+  const dj = window.__djclanker;
+  const off = !dj.automix.enabled && !dj.performer.enabled;
+  dj.decks.A.pause();
+  dj.decks.B.pause();
+  return off;
+});
+check('SHOW again stands everything down', showOff === true);
+
 await page.screenshot({ path: `${OUT}-automix.png`, fullPage: true });
 await browser.close();
 

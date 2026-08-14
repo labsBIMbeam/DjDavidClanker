@@ -44,7 +44,11 @@ network access to a host shell.
   the seam. Empty lanes run the 600B matrix rain
 - CUE with CDJ logic (set while stopped, jump back while playing), plus
   **4 hot cues** per deck: empty pad stores, set pad jumps (fires from
-  stop), double-click clears
+  stop), double-click clears — drawn as numbered ember pins on the zoom
+  wave and as ticks on the overview strip
+- **● REC**: record the master bus; stopping downloads the whole set as a
+  webm/opus file. **⚡ SHOW**: one button arms the full autopilot — queue,
+  automix with SMART order, performer riding on top
 - **Beat loops**: IN/OUT for manual loops, 1/2/4/8 snap onto the detected
   grid, EXIT leaves
 - **Tempo fader** ±8 / ±16 / ±50 %, BPM detection with beat phase and 4/4

@@ -394,6 +394,14 @@ html, body {
   background: rgba(63, 174, 90, 0.10);
 }
 
+/* Set recording: red pulse while the master is being captured. */
+.btn-rec.on { color: #d93000; border-color: #d93000; animation: recpulse 1.2s ease-in-out infinite; }
+@keyframes recpulse { 50% { box-shadow: 0 0 10px rgba(217, 48, 0, 0.7); } }
+.rec-time { font-family: var(--mono); font-size: 11px; color: #ff5a33; min-width: 40px; }
+
+/* Autopilot show button. */
+.btn-show.on { color: #ff6a00; border-color: #ff6a00; box-shadow: 0 0 10px rgba(255, 106, 0, 0.5); }
+
 /* Performer: the ✦ button in the automix bar plus its mood/action readout. */
 .btn-perf.on { color: #ff6a00; border-color: #ff6a00; box-shadow: 0 0 8px rgba(255, 106, 0, 0.35); }
 .perf-info {
