@@ -22,6 +22,7 @@
       <span class="dot"></span>
       <b>NIP-5D DEV SHELL</b>
       <span id="who"></span>
+      <button id="nip07" title="Sign in with your NIP-07 browser extension (Alby, nos2x, …) — publishes then carry YOUR signature to real relays">⚡ NIP-07</button>
       <button id="toggleId">Switch identity</button>
       <button id="clearLog">Clear log</button>
     </div>
@@ -57,6 +58,52 @@
       let pubkey = 'e88a691e98d9987c964521dff60025f60700378a4879180dcbbb4a5027850411';
       const ALT = '3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d';
       document.getElementById('who').textContent = pubkey.slice(0, 12) + '…';
+
+      /* -------------------------- NIP-07 -------------------------- */
+      // The shell page has a real origin, so the signer extension injects
+      // window.nostr HERE — exactly where a NIP-5D host is supposed to hold
+      // the keys. Signed in, every publish from the napplet is signed by the
+      // extension and pushed to real relays; the napplet never sees a key.
+      let nip07 = false;
+      const RELAYS = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net'];
+      const NO_RELAY = new URLSearchParams(location.search).has('norelay');
+
+      document.getElementById('nip07').onclick = async () => {
+        if (!window.nostr) return log('NIP-07: no extension found (window.nostr missing)');
+        try {
+          pubkey = await window.nostr.getPublicKey();
+          nip07 = true;
+          document.getElementById('who').textContent = `${pubkey.slice(0, 12)}… (NIP-07)`;
+          document.getElementById('nip07').textContent = '⚡ signed in';
+          log('NIP-07 signed in as', pubkey.slice(0, 16) + '…');
+          post({ type: 'identity.changed', pubkey });
+        } catch (e) {
+          log('NIP-07 sign-in refused:', e.message || String(e));
+        }
+      };
+
+      /** Push a signed event to the relay set; resolve {url: accepted}. */
+      function publishToRelays(signed) {
+        if (NO_RELAY) return Promise.resolve({});
+        const results = {};
+        const tries = RELAYS.map((url) => new Promise((resolve) => {
+          let ws;
+          const done = (ok) => { results[url] = ok; try { ws && ws.close(); } catch { /* closed */ } resolve(); };
+          const timer = setTimeout(() => done(false), 3500);
+          try {
+            ws = new WebSocket(url);
+            ws.onopen = () => ws.send(JSON.stringify(['EVENT', signed]));
+            ws.onmessage = (m) => {
+              try {
+                const d = JSON.parse(m.data);
+                if (d[0] === 'OK' && d[1] === signed.id) { clearTimeout(timer); done(Boolean(d[2])); }
+              } catch { /* not for us */ }
+            };
+            ws.onerror = () => { clearTimeout(timer); done(false); };
+          } catch { clearTimeout(timer); done(false); }
+        }));
+        return Promise.all(tries).then(() => results);
+      }
 
       const proxy = (u) => `/proxy?url=${encodeURIComponent(u)}`;
       const storage = new Map();
@@ -143,6 +190,26 @@
           }
           case 'outbox.publish':
           case 'relay.publish': {
+            if (nip07 && window.nostr) {
+              // The real path: extension signs, shell pushes to real relays.
+              try {
+                const tmpl = {
+                  kind: msg.event.kind,
+                  content: msg.event.content || '',
+                  tags: msg.event.tags || [],
+                  created_at: Math.floor(Date.now() / 1000),
+                  pubkey,
+                };
+                const signed = await window.nostr.signEvent(tmpl);
+                const relays = await publishToRelays(signed);
+                const okCount = Object.values(relays).filter(Boolean).length;
+                log(type, 'kind', String(signed.kind), `signed by NIP-07, ${okCount}/${Object.keys(relays).length || 0} relays accepted`);
+                return post({ type: `${type}.result`, id, ok: true, event: signed, eventId: signed.id, relays });
+              } catch (e) {
+                log(type, 'NIP-07 signing failed:', e.message || String(e));
+                return post({ type: `${type}.error`, id, error: 'sign-failed', message: e.message || String(e) });
+              }
+            }
             const ev = { ...(msg.event || {}), id: 'dev' + Math.random().toString(16).slice(2, 10), pubkey, sig: 'de'.repeat(64) };
             log(type, 'kind', String(ev.kind), (ev.tags || []).length + ' tags');
             return post({ type: `${type}.result`, id, ok: true, event: ev, eventId: ev.id, relays: { 'wss://dev': true } });

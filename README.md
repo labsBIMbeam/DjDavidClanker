@@ -180,7 +180,9 @@ pads toggle slot 2.
 
 **Value4Value**
 - Zap button per track and per deck
-- Publish the session's setlist as a kind-30003 event
+- Publish the session's setlist as a kind-30003 event — and with **⚡
+  NIP-07** signed into the dev shell (Alby/nos2x on the shell's real
+  origin), it goes out signed by YOUR key to real relays
 
 **Design**
 - The UI follows the **600B design system** — tokens at the top of

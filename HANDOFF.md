@@ -1,6 +1,6 @@
 # Handoff — DJ David Clanker
 
-As of: August 14, 2026 · Status: **working, 222 E2E checks across 9 suites + 9 pytest green**
+As of: August 14, 2026 · Status: **working, 224 E2E checks across 9 suites + 9 pytest green**
 
 This document is for the person who touches the project next — whether that's
 you in three months or someone else. It describes what is built, **why it is
@@ -433,6 +433,16 @@ node dev/smoke.mjs # E2E, screenshots to /tmp/clanker-*.png
 `npm run shell` needs the built-in server proxy: `resource.bytes` has to
 reach hosts that send no CORS headers — a pure browser shell can't do that.
 Allowed hosts live in `dev/serve-shell.mjs` (`ALLOW_HOSTS`).
+
+**NIP-07 in the dev shell**: the shell page has a real origin, so a signer
+extension (Alby, nos2x) injects `window.nostr` THERE — which is exactly
+where a NIP-5D host holds keys. ⚡ NIP-07 in the top bar signs in
+(identity.changed flows to the napplet); from then on every
+`outbox/relay.publish` is signed by the extension and pushed to real relays
+(damus / nos.lol / primal, 3.5 s OK-wait each; `?norelay=1` skips the
+network for tests). The napplet never sees a key. Demo closer: play the
+set, hit "publish setlist" in the Nostr section — it goes out as a real
+kind-30003 under YOUR npub.
 
 Two dev-shell lessons that cost a day of green-suite archaeology:
 
