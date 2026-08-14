@@ -1,0 +1,24 @@
+# Local Navidrome serving the crate library the ingest service fills.
+#
+#   cd ingest
+#   docker compose up -d
+#   -> http://localhost:4533  (first visit creates the admin account)
+#
+# Then in the DJ app: ⚙ settings -> Subsonic URL http://localhost:4533 with
+# that user, and (optionally) NAVIDROME_URL/USER/PASS env on the ingest
+# service so every finished ingest triggers a rescan. Navidrome also watches
+# the folder on its own every minute.
+services:
+  navidrome:
+    image: deluan/navidrome:latest
+    container_name: clanker-navidrome
+    ports:
+      - "4533:4533"
+    environment:
+      ND_SCANSCHEDULE: 1m
+      ND_LOGLEVEL: info
+      ND_MUSICFOLDER: /music
+    volumes:
+      - ./data/navidrome:/data
+      - ./data/library:/music:ro
+    restart: unless-stopped

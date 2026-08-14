@@ -1,4 +1,4 @@
-import { h, fader } from './dom.js';
+import { h, fader, scrambleTo } from './dom.js';
 
 /** Control strip for the Automix: on/off, skip, fade length, sync, shuffle. */
 export function AutomixBar(automix, { onQueueFromBrowser, performer = null }) {
@@ -127,7 +127,7 @@ export function AutomixBar(automix, { onQueueFromBrowser, performer = null }) {
   /** Called each frame; cheap string/width updates only. */
   function tick() {
     const d = automix.describe();
-    if (label.textContent !== d.label) label.textContent = d.label;
+    scrambleTo(label, d.label); // ticker "decrypts" on every state change
     if (detail.textContent !== d.detail) detail.textContent = d.detail;
 
     // The meter fills as the live track approaches its transition point.

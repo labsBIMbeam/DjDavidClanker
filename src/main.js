@@ -9,7 +9,7 @@ import { MixerStrip } from './ui/mixer.js';
 import { Browser } from './ui/browser.js';
 import { openModal, toast } from './ui/modal.js';
 import { openZapDialog } from './ui/zapmodal.js';
-import { h, clear } from './ui/dom.js';
+import { h, clear, scrambleTo } from './ui/dom.js';
 import { capabilities, store, getPublicKey, onIdentityChanged, inShell, mediaSession } from './lib/nap.js';
 import { publishSetlist } from './lib/nostr.js';
 import { hexToNpub } from './lib/bech32.js';
@@ -79,6 +79,21 @@ const btnRec = h('button', {
   },
 }, '● REC');
 
+// Stage view for the beamer: waves + platter clusters only, everything
+// booth-only (browser, settings noise) tucked away. `?stage=1` boots into it.
+const btnStage = h('button', {
+  class: 'btn btn-mini btn-stage',
+  title: 'Stage view for the second screen: waves and decks only — the crowd does not need the browser',
+  onclick: () => {
+    document.body.classList.toggle('stage-view');
+    btnStage.classList.toggle('on', document.body.classList.contains('stage-view'));
+  },
+}, '⛶ STAGE');
+if (new URLSearchParams(location.search).has('stage')) {
+  document.body.classList.add('stage-view');
+  btnStage.classList.add('on');
+}
+
 const header = h('header', { class: 'app-head' },
   h('div', { class: 'brand' },
     h('img', { class: 'brand-logo', src: logoUrl, alt: '600' }),
@@ -86,7 +101,7 @@ const header = h('header', { class: 'app-head' },
     h('span', { class: 'brand-sub' }, 'wavlake · v4v · two decks'),
   ),
   onAirChip,
-  h('div', { class: 'head-right' }, btnRec, recTime, modeEl, identityEl,
+  h('div', { class: 'head-right' }, btnStage, btnRec, recTime, modeEl, identityEl,
     h('button', { class: 'btn btn-mini', title: 'Shortcuts & info', onclick: showHelp }, '?'),
   ),
 );
@@ -147,10 +162,12 @@ function audibleDecks() {
   return out;
 }
 
+let lastBeatIdx = -1;
+
 function tickWavedeck() {
   const audible = audibleDecks();
   const label = audible.length ? `ON AIR · DECK ${audible.join(' + ')}` : 'OFF AIR';
-  if (onAirText.textContent !== label) onAirText.textContent = label;
+  scrambleTo(onAirText, label); // decrypt-style swap, no-ops while unchanged
   onAirChip.classList.toggle('live', audible.length > 0);
 
   // Recording chip: red pulse + elapsed time while the master is captured.
@@ -170,6 +187,18 @@ function tickWavedeck() {
     beatIdx = Math.floor(mod(live.position - anchor, 4 * beat) / beat);
   }
   beatDots.forEach((d, i) => d.classList.toggle('on', i === beatIdx));
+
+  // Bar-one pulse: a short glow ripple through the live platter and the
+  // beat row every time the bar turns over. Pure class-flip — CSS animates.
+  if (beatIdx === 0 && lastBeatIdx !== 0 && live) {
+    deckWrap.classList.remove('bar-one', 'bar-one-a', 'bar-one-b');
+    void deckWrap.offsetWidth; // restart the CSS animation
+    deckWrap.classList.add('bar-one', `bar-one-${live.id.toLowerCase()}`);
+  }
+  lastBeatIdx = beatIdx;
+
+  // Data-storm shimmer while a handover runs.
+  deckWrap.classList.toggle('mixing', Boolean(automix.transition || automix.fade));
 
   const latched = mixer.decks.A.syncedTo || mixer.decks.B.syncedTo;
   syncChip.classList.toggle('latched', Boolean(latched));

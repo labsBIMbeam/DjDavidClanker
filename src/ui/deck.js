@@ -765,7 +765,9 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
   /** Size the zoom canvas to its layout box (DPR-aware); painting is live. */
   function sizeWave() {
     const w = wave.clientWidth || 600;
-    const hgt = 64;
+    // Follow the CSS height so the stage (beamer) view renders natively tall
+    // instead of upscaling a 64 px buffer.
+    const hgt = wave.clientHeight || 64;
     const bw = Math.floor(w * (window.devicePixelRatio || 1));
     const bh = Math.floor(hgt * (window.devicePixelRatio || 1));
     if (wave.width !== bw) wave.width = bw;

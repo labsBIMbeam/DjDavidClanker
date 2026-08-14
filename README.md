@@ -146,7 +146,10 @@ pads toggle slot 2.
   plays), **Nostr** playlists, **local files** (drag & drop, analyzed in
   seconds, session-scoped)
 - **Your own server**: the Server tab speaks the Subsonic API to a
-  self-hosted Navidrome — your collection, full quality, salt+token auth
+  self-hosted Navidrome — your collection, full quality, salt+token auth.
+  A ready-made local instance ships in `ingest/docker-compose.yml`
+  (`cd ingest && docker compose up -d` → http://localhost:4533, serving
+  the same library folder the ingest pipeline fills)
 - **Discover**: Audius (open API, DJ catalog), Jamendo (Creative Commons —
   clean for public sets, free client_id) and Archive.org netlabels/live
   sets. Any find promotes into the crate with ⤴; Archive finds auto-promote
