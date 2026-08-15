@@ -325,6 +325,12 @@ const browser = Browser({
   queueOps: {
     promote: (track) => automix.promote(track),
     remove: (id) => automix.removeFromQueue(id),
+    append: (track) => automix.append(track),
+    insertAt: (track, slot) => automix.insertAt(track, slot),
+    cycleOrder: () => {
+      automix.order = { list: 'shuffle', shuffle: 'smart', smart: 'list' }[automix.order] || 'list';
+      return automix.order;
+    },
   },
 });
 

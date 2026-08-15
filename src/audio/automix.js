@@ -153,6 +153,39 @@ export class Automix {
     return true;
   }
 
+  /** Append to the queue end; a track already waiting stays put. */
+  append(track) {
+    if (!track || !track.id) return false;
+    if (this.queue.some((t, k) => k >= this.cursor && t && t.id === track.id)) return false;
+    this.queue.push(track);
+    return true;
+  }
+
+  /**
+   * Push a track into queue slot 1–3 behind the playhead — from any list
+   * (inserts) or from deeper in the queue (moves). The slot counts as a
+   * DJ decision, so the lookahead treats it as materialized.
+   */
+  insertAt(track, slot) {
+    if (!track || !track.id) return false;
+    const at = Math.min(this.cursor + Math.max(0, (slot || 1) - 1), this.queue.length);
+    const i = this.queue.findIndex((t, k) => k >= this.cursor && t && t.id === track.id);
+    if (i === at) return true;
+    if (i >= 0) {
+      const [x] = this.queue.splice(i, 1);
+      if (i < this._look) this._look -= 1;
+      const dest = Math.min(at, this.queue.length);
+      this.queue.splice(dest, 0, x);
+      if (dest < this._look) this._look += 1;
+      else this._look = Math.max(this._look, dest + 1);
+      return true;
+    }
+    this.queue.splice(at, 0, track);
+    if (at < this._look) this._look += 1;
+    else this._look = Math.max(this._look, at + 1);
+    return true;
+  }
+
   /** Drop a queued track (first match at/after the cursor). */
   removeFromQueue(id) {
     const i = this.queue.findIndex((t, k) => k >= this.cursor && t && t.id === id);

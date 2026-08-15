@@ -67,7 +67,10 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckSt
   });
 
   function openTab(key) {
-    mode = 'sources';
+    // The queue desk keeps its panel pinned while the source tabs switch the
+    // list below it — that is the whole point of the desk. Every other path
+    // lands in plain sources mode.
+    if (mode !== 'queue') mode = 'sources';
     tab = key;
     listEpoch++; // whatever is still in flight belongs to the old tab
     syncMode();
@@ -106,13 +109,30 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckSt
   const modeSources = h('button', {
     class: 'mode-btn',
     title: 'Track sources: charts, search, your server, discovery, crate, Nostr',
-    onclick: () => openTab(tab),
+    onclick: () => { mode = 'sources'; openTab(tab); },
   }, 'SOURCES');
+  const modeQueue = h('button', {
+    class: 'mode-btn mode-queue',
+    title: 'Queue and playlist in ONE place: the running queue stays pinned on top, pick any source below, add tracks with + or push them straight to slot 1/2/3',
+    onclick: () => showQueueDesk(),
+  }, '≡ QUEUE');
 
   function syncMode() {
     modeSetlist.classList.toggle('on', mode === 'setlist');
     modeSources.classList.toggle('on', mode === 'sources');
+    modeQueue.classList.toggle('on', mode === 'queue');
     root.classList.toggle('setlist-mode', mode === 'setlist');
+    root.classList.toggle('queue-mode', mode === 'queue');
+  }
+
+  function showQueueDesk() {
+    mode = 'queue';
+    deskSig = '';
+    syncMode();
+    renderSide();
+    // The list below keeps whatever source was active — switching sources is
+    // exactly what the desk is for.
+    openTab(tab);
   }
 
   function cueSummary(t) {
@@ -325,11 +345,15 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckSt
     onclick: () => localInput.click(),
   }, '📁 LOCAL');
 
+  /** Queue desk: the running queue pinned above the source list. */
+  const deskEl = h('div', { class: 'queue-desk' });
+  let deskSig = '';
+
   const root = h('div', { class: 'browser' },
-    h('div', { class: 'browser-modes' }, modeSetlist, modeSources),
+    h('div', { class: 'browser-modes' }, modeSetlist, modeQueue, modeSources),
     h('div', { class: 'browser-tabs' }, ...tabs, h('span', { class: 'tabs-spacer' }), btnLocal, localInput),
     h('div', { class: 'browser-main' }, sideEl,
-      h('div', { class: 'browser-results' }, headEl, statusEl, list), railEl),
+      h('div', { class: 'browser-results' }, deskEl, headEl, statusEl, list), railEl),
   );
   syncMode();
 
@@ -569,7 +593,19 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckSt
       ),
       h('div', { class: 'row-actions' },
         ...orderActs,
-        queueOps ? h('button', {
+        // Queue desk: + appends, 1/2/3 pushes straight into the top slots.
+        // Everywhere else the single ⤒ (play next) keeps the row compact.
+        mode === 'queue' && queueOps ? h('span', { class: 'qslot-group' },
+          h('button', {
+            class: 'btn btn-mini', title: 'Append to the queue end',
+            onclick: (e) => { e.stopPropagation(); queueOps.append(t); deskSig = ''; railSig = ''; },
+          }, '+'),
+          ...[1, 2, 3].map((n) => h('button', {
+            class: 'btn btn-mini btn-qslot', title: `Push into queue slot ${n}`,
+            onclick: (e) => { e.stopPropagation(); queueOps.insertAt(t, n); deskSig = ''; railSig = ''; },
+          }, String(n))),
+        ) : null,
+        mode !== 'queue' && queueOps ? h('button', {
           class: 'btn btn-mini btn-qnext',
           title: 'Play next — puts this track right behind the playhead',
           onclick: (e) => { e.stopPropagation(); queueOps.promote(t); railSig = ''; },
@@ -639,6 +675,7 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckSt
       if (el.className !== rowCls.trim()) el.className = rowCls.trim();
     }
     renderRail(s);
+    renderQueueDesk(s);
   }
 
   let railSig = '';
@@ -683,6 +720,63 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckSt
         onclick: () => { queueOps && queueOps.remove(t.id); railSig = ''; },
       }, '✕'),
     );
+  }
+
+  /**
+   * The queue desk: the WHOLE running queue pinned above the source list —
+   * queue and playlist in one view. Sources switch below it, every listed
+   * track offers + (append) and 1/2/3 (straight into the top slots).
+   */
+  function renderQueueDesk(s) {
+    if (mode !== 'queue') {
+      if (deskEl.childElementCount) { clear(deskEl); deskSig = ''; }
+      return;
+    }
+    const sig = ['desk', s.queueTotal, s.order, ...s.queue.map((t) => t.id)].join('|');
+    if (sig === deskSig && deskEl.childElementCount) return;
+    deskSig = sig;
+    clear(deskEl);
+    const orderLabel = { list: 'LIST', shuffle: 'SHUF', smart: 'SMART' }[s.order] || 'LIST';
+    deskEl.appendChild(h('div', { class: 'side-h desk-head' },
+      `QUEUE · ${s.queueTotal} tracks`,
+      h('span', { class: 'desk-head-btns' },
+        queueOps && queueOps.cycleOrder ? h('button', {
+          class: 'btn btn-mini btn-qorder',
+          title: 'Running order: LIST as queued · SHUF random · SMART by key/BPM/energy — the rows below always show what will actually play',
+          onclick: () => { queueOps.cycleOrder(); deskSig = ''; railSig = ''; },
+        }, orderLabel) : null,
+        queueOps ? h('button', {
+          class: 'btn btn-mini btn-addall-q',
+          title: 'Append EVERY track of the list below — already queued ones stay where they are',
+          onclick: () => {
+            let n = 0;
+            for (const t of items) if (queueOps.append(t)) n += 1;
+            deskSig = '';
+            railSig = '';
+          },
+        }, '+ ALL FROM LIST') : null,
+      ),
+    ));
+    const wrap = h('div', { class: 'qfull desk-list' });
+    s.queue.forEach((t, i) => {
+      wrap.appendChild(h('div', { class: 'qfull-row' },
+        h('span', { class: 'qfull-pos' }, String(i + 1)),
+        h('div', { class: 'qfull-meta' },
+          h('div', { class: 'qfull-title' }, t.title),
+          h('div', { class: 'qfull-sub' }, `${t.artist}${t.duration ? ' · ' + fmtTime(t.duration) : ''}`),
+        ),
+        i > 0 ? h('button', {
+          class: 'btn btn-mini', title: 'Play next',
+          onclick: () => { queueOps && queueOps.promote(t); deskSig = ''; railSig = ''; },
+        }, '⤒') : null,
+        h('button', {
+          class: 'btn btn-mini btn-qdrop', title: 'Drop from the queue',
+          onclick: () => { queueOps && queueOps.remove(t.id); deskSig = ''; railSig = ''; },
+        }, '✕'),
+      ));
+    });
+    if (!s.queueTotal) wrap.appendChild(h('div', { class: 'muted' }, 'Queue is empty — add from the list below.'));
+    deskEl.appendChild(wrap);
   }
 
   function renderRail(s) {
