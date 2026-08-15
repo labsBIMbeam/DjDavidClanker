@@ -25,9 +25,18 @@ behavior at any step — the 238-check board is the net.
 | `@clanker/deck` | deck half of `engine.js`, `scratch.js`, `autoscratch.js`, `keylock.js`, `analyze.js`, `analysiscache.js`, `ui/deck.js`, `ui/platter.js` | maybe later — a practice deck |
 | `@clanker/mixer` | mixer half of `engine.js`, `fx.js`, `macrofx.js`, `performer.js`(?), `ui/mixer.js` | yes — an FX box: LINE-IN → 16 units → out |
 
-Also on the list, outside the four: `@clanker/viz` (`ui/visualizer.js`) —
-the ZapViz Winamp visualizer is the easiest standalone napplet of all
-(master analyser in, ridiculousness out).
+Also on the list, outside the four:
+
+- `@clanker/viz` (`ui/visualizer.js`) — the ZapViz Winamp visualizer is
+  the easiest standalone napplet of all (master analyser in,
+  ridiculousness out).
+- `@clanker/lanes` — the COMBINED TRACK LANE: both waveforms as the
+  beat-flush, playhead-centered pair with the shared beat-view, beat row
+  and cue pins (`ui/deck.js` lane rendering + `laneView`). As a solo
+  napplet it is the booth's second-screen face without the desk — feed it
+  two deck states, get the aligned stack. Booth request from the first
+  live night; extraction rides with M7-3 because the lane renderer and
+  the deck panel share their canvas code today.
 
 ## The knots (what actually blocks a clean cut)
 
