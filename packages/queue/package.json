@@ -1,0 +1,9 @@
+{
+  "name": "@clanker/queue",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "Headless auto-DJ queue: order modes, materialized lookahead, smart selection, transition planning. Extraction target M7-2 — see docs/M7-modules.md.",
+  "main": "src/index.js"
+}

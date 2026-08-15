@@ -1,0 +1,9 @@
+{
+  "name": "@clanker/deck",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "One deck: dual backends, platter physics, granular scratch, keylock worklet, BPM/key/structure analysis, wavedeck UI. Extraction target M7-3 — see docs/M7-modules.md.",
+  "main": "src/index.js"
+}
