@@ -212,6 +212,18 @@ file's road into the permanent crate. Handlers matching `*.local.py` load
 like any other but are gitignored: site-specific gates stay off the repo.
 Failed files are quarantined in `data/failed/`, never stall the queue.
 
+The ingest also carries **`GET /proxy?url=`** — a streaming CORS relay for
+the STANDALONE napplet (the public nsite build). Wavlake's CDN sends no
+CORS headers, so a browser without a host shell can only stream BASIC; with
+`http://127.0.0.1:8321/proxy?url={url}` in the app's CORS-proxy setting the
+bytes decode into the FULL backend. Guards: http(s) only, public targets
+only (loopback/private/link-local refused), every redirect hop re-checked,
+256 MB cap, 30 s connect window. Honest limit: guard-resolve and
+fetch-resolve are two DNS lookups — rebinding between them is possible and
+accepted for a localhost helper. `dev/local-stack.mjs` starts ingest (bound
+to 127.0.0.1) plus the Navidrome compose in one command and prints the three
+settings values to paste.
+
 **Discover tab** (gates 4+5): three source groups by role — **Audius**
 (open API; the entry point is the rotating host list at api.audius.co, and
 the client pins a first-party `*.audius.co` node because that is what the

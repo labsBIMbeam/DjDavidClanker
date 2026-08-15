@@ -14,20 +14,23 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import ipaddress
 import json
 import logging
 import os
 import re
 import secrets
 import shutil
+import socket
 import subprocess
 import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, UploadFile
+from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from mutagen import File as MutagenFile
 from mutagen.easyid3 import EasyID3
 from mutagen.flac import FLAC
@@ -202,6 +205,87 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 def health() -> dict:
     pending = sum(1 for f in (*INBOX.iterdir(), *WATCH.iterdir()) if f.is_file())
     return {"ok": True, "pending": pending, **stats}
+
+
+PROXY_MAX_BYTES = 256 * 1024 * 1024  # a FLAC album track fits, a runaway does not
+PROXY_CHUNK = 256 * 1024
+
+
+def _require_public_host(host: str) -> None:
+    """Refuse loopback/private/link-local targets — the relay serves the
+    public internet to the napplet, never the local network to a caller."""
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail="unresolvable host") from exc
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
+            raise HTTPException(status_code=400, detail="private target refused")
+
+
+def _check_proxy_target(url: str) -> None:
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme not in ("http", "https"):
+        raise HTTPException(status_code=400, detail="http(s) only")
+    if not parts.hostname:
+        raise HTTPException(status_code=400, detail="no host")
+    _require_public_host(parts.hostname)
+
+
+class _GuardedRedirect(urllib.request.HTTPRedirectHandler):
+    """Every redirect hop passes the same public-host guard as the entry URL."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        _check_proxy_target(urllib.parse.urljoin(req.full_url, newurl))
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_proxy_opener = urllib.request.build_opener(_GuardedRedirect)
+
+
+@app.get("/proxy")
+def proxy(url: str) -> StreamingResponse:
+    """CORS relay for the STANDALONE napplet (the public nsite build).
+
+    Wavlake's audio CDN sends no CORS headers, so a browser without a NIP-5D
+    host cannot pull tracks into the decoded FULL backend. The napplet's
+    settings accept a proxy template — point it here:
+
+        http://127.0.0.1:8321/proxy?url={url}
+
+    and the service fetches the bytes and re-serves them under its own
+    permissive CORS. Streaming end to end, 30 s connect window, hard size
+    cap. Known limit: the host is resolved for the guard and again for the
+    fetch — a DNS-rebinding attacker could slip between the two; for a
+    localhost helper serving one DJ that trade is accepted and documented.
+    """
+    _check_proxy_target(url)
+    req = urllib.request.Request(url, headers={"User-Agent": "djclanker-ingest-proxy"})
+    try:
+        upstream = _proxy_opener.open(req, timeout=30)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"upstream failed: {exc}") from exc
+    ctype = upstream.headers.get("Content-Type", "application/octet-stream")
+
+    def body():
+        sent = 0
+        try:
+            while True:
+                chunk = upstream.read(PROXY_CHUNK)
+                if not chunk:
+                    break
+                sent += len(chunk)
+                if sent > PROXY_MAX_BYTES:
+                    log.warning("proxy: size cap hit for %s", url)
+                    break
+                yield chunk
+        finally:
+            upstream.close()
+
+    return StreamingResponse(body(), media_type=ctype)
 
 
 @app.post("/ingest")
