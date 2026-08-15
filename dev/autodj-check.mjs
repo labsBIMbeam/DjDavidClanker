@@ -618,13 +618,18 @@ const ui = await frame.evaluate(() => {
   return {
     keyBadge: keyA ? keyA.textContent : null,
     keyVisible: keyA ? keyA.style.display !== 'none' : false,
+    // Which fixture sits on A after the transitions is the smart order's
+    // call (the materialized lookahead decides earlier than the old lazy
+    // pick did) — the badge's job is to mirror the DECK's truth, not to
+    // pin one running order. Both fixtures carry an exact key.
+    deckKey: dj.decks.A.musicalKey ? dj.decks.A.musicalKey.camelot : null,
     styleBefore: before,
     styleAfter: after,
     orderLabel: orderBtn ? orderBtn.textContent : null,
   };
 });
-check('deck head shows the Camelot key badge', ui.keyVisible && ui.keyBadge === '8B',
-  `${ui.keyBadge}`);
+check('deck head shows the Camelot key badge', ui.keyVisible && ui.keyBadge && ui.keyBadge === ui.deckKey,
+  `badge=${ui.keyBadge} deck=${ui.deckKey}`);
 check('transition style button cycles AUTO → BLEND',
   ui.styleBefore === 'auto' && ui.styleAfter === 'blend');
 check('order button reflects the SMART default', ui.orderLabel === 'SMART',

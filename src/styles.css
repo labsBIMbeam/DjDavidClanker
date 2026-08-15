@@ -404,7 +404,7 @@ html, body {
 }
 .vis-canvas.show { display: block; }
 .app { position: relative; z-index: 1; }
-.btn-stage.on { color: #ff6a00; border-color: #ff6a00; }
+.btn-stage.on, .btn-pop.on { color: #ff6a00; border-color: #ff6a00; }
 .stage-view .browser { display: none; }
 .stage-view .app { max-width: none; padding: 10px 24px 24px; }
 .stage-view .lane-center .wave { height: 110px; }
@@ -571,6 +571,22 @@ html, body {
 .upnext-title { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .upnext-sub { font-size: 10px; color: var(--muted); }
 .upnext-fill { border-style: dashed; }
+.upnext-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.upnext-toggle { padding: 0 7px; }
+.qfull { max-height: 44vh; overflow-y: auto; display: flex; flex-direction: column; gap: 3px; }
+.qfull-row {
+  display: flex; align-items: center; gap: 7px; padding: 3px 6px;
+  border: 1px solid #241b10; border-radius: 6px; background: #14100a;
+}
+.qfull-row:first-child { border-color: #4a3213; background: #1a130a; }
+.qfull-pos { font-size: 10px; color: #8a7a5f; min-width: 18px; text-align: right; }
+.qfull-meta { flex: 1; min-width: 0; }
+.qfull-title { font-size: 11px; color: #fff7ec; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qfull-sub { font-size: 10px; color: #8a7a5f; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.btn-qdrop { color: #8a5a3a; }
+.btn-qdrop:hover { color: #ff6a00; border-color: #ff6a00; }
+.suggest-card { border-style: dashed; opacity: 0.92; }
+.btn-qnext { font-weight: 700; }
 @media (max-width: 1100px) {
   .browser-main { grid-template-columns: 220px 1fr; }
   .upnext { display: none; }

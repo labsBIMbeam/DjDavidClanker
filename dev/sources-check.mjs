@@ -282,11 +282,11 @@ try {
     dj.midi.handle([0xb0, 15, 127]); // K6 → cue volume 1
     const cue = dj.mixer.cueVolume;
     dj.midi.handle([0xb0, 3, 0]); // K1 hard left → deck A lowpass
-    // K3 now drives FX slot 1 (default flanger): on + primary amount.
+    // K3 drives FX slot 1 (default barber since the booth round): on + amount.
     dj.midi.handle([0xb0, 12, 110]);
-    const slot1On = dj.decks.A.fx.flanger.on && Math.abs(dj.decks.A.fx.flanger.mix - 110 / 127) < 0.03;
+    const slot1On = dj.decks.A.fx.barber.on && Math.abs(dj.decks.A.fx.barber.mix - 110 / 127) < 0.03;
     dj.midi.handle([0xb0, 12, 0]);
-    const slot1Off = dj.decks.A.fx.flanger.on === false;
+    const slot1Off = dj.decks.A.fx.barber.on === false;
     // The macro/echo readout follows engine truth (set directly here).
     dj.decks.A.setMacroValue(0.73);
     const filt = dj.decks.A.filter;

@@ -13,6 +13,7 @@ import {
 import { camelotFor } from '../audio/analyze.js';
 import { setlist } from '../lib/setlist.js';
 import { localSongs } from '../lib/localsongs.js';
+import { scoreCandidate, summaryFor } from '../audio/selection.js';
 
 /** "124 · 8B" chip when the track's analysis is cached; null otherwise. */
 function keyBpmChip(t) {
@@ -30,7 +31,7 @@ const CRATE_KEY = 'crate.v1';
  * crate (single tracks as playlist + artists/albums as sources), and
  * kind-30003 sets from Nostr.
  */
-export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckState, onQueueFromBrowser, getDeckCues }) {
+export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckState, onQueueFromBrowser, getDeckCues, queueOps }) {
   let tab = 'charts';
   /** 'setlist' shows the DJ's own ordered crate; 'sources' the tabs below it. */
   let mode = 'sources';
@@ -568,6 +569,11 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckSt
       ),
       h('div', { class: 'row-actions' },
         ...orderActs,
+        queueOps ? h('button', {
+          class: 'btn btn-mini btn-qnext',
+          title: 'Play next — puts this track right behind the playhead',
+          onclick: (e) => { e.stopPropagation(); queueOps.promote(t); railSig = ''; },
+        }, '⤒') : null,
         !inSetlist && canPromote(t) ? ingestButton(t) : null,
         star,
         inSetlist ? null : h('button', {
@@ -636,31 +642,119 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckSt
   }
 
   let railSig = '';
+  let railOpen = false;
+  /** Wavlake picks: charts pool fetched once, re-ranked against the live deck. */
+  let suggestPool = null;
+  let suggestBusy = false;
+  let suggestions = [];
+  let suggestLiveKey = '';
+
+  function ensureSuggestPool() {
+    if (suggestPool || suggestBusy) return;
+    suggestBusy = true;
+    wl.topTracks(40).then((list) => { suggestPool = list || []; }).catch(() => { suggestPool = []; })
+      .finally(() => { suggestBusy = false; railSig = ''; });
+  }
+
+  function rankSuggestions(s) {
+    if (!suggestPool || !suggestPool.length) return [];
+    const taken = new Set([...s.queue.map((t) => t.id), ...s.playedIds,
+      s.A.trackId, s.B.trackId].filter(Boolean));
+    const pool = suggestPool.filter((t) => !taken.has(t.id));
+    if (!s.liveSummary) return pool.slice(0, 3);
+    const scored = pool.map((t) => ({ t, s: scoreCandidate(s.liveSummary, summaryFor(t), [], trackCacheId(t)) }));
+    scored.sort((a, b) => b.s - a.s);
+    return scored.slice(0, 3).map((x) => x.t);
+  }
+
+  function queueEntryRow(t, i) {
+    return h('div', { class: 'qfull-row' },
+      h('span', { class: 'qfull-pos' }, String(i + 1)),
+      h('div', { class: 'qfull-meta' },
+        h('div', { class: 'qfull-title' }, t.title),
+        h('div', { class: 'qfull-sub' }, `${t.artist}${t.duration ? ' · ' + fmtTime(t.duration) : ''}`),
+      ),
+      i > 0 ? h('button', {
+        class: 'btn btn-mini', title: 'Play next',
+        onclick: () => { queueOps && queueOps.promote(t); railSig = ''; },
+      }, '⤒') : null,
+      h('button', {
+        class: 'btn btn-mini btn-qdrop', title: 'Drop from the queue',
+        onclick: () => { queueOps && queueOps.remove(t.id); railSig = ''; },
+      }, '✕'),
+    );
+  }
 
   function renderRail(s) {
+    ensureSuggestPool();
     const next = s.queue.slice(0, 3);
-    const sig = next.map((t) => t.id).join('|');
+    if (suggestLiveKey !== (s.liveSummary ? `${s.liveSummary.bpm}|${s.liveSummary.camelot}` : '')) {
+      suggestLiveKey = s.liveSummary ? `${s.liveSummary.bpm}|${s.liveSummary.camelot}` : '';
+      railSig = ''; // live deck moved on — re-rank the picks
+    }
+    const sig = [railOpen ? 'open' : 'top', s.queueTotal, s.order,
+      ...s.queue.map((t) => t.id)].join('|');
     if (sig === railSig && railEl.childElementCount) return;
     railSig = sig;
+    suggestions = rankSuggestions(s);
     clear(railEl);
-    railEl.appendChild(h('div', { class: 'side-h' }, 'UP NEXT'));
-    next.forEach((t, i) => {
-      railEl.appendChild(h('div', { class: `upnext-card ${i === 0 ? 'q1' : ''}` },
-        h('span', { class: 'upnext-q' }, `Q${i + 1}`),
-        t.artworkUrl
-          ? setImage(h('img', { class: 'upnext-art', alt: '' }), t.artworkUrl)
-          : h('div', { class: 'upnext-art upnext-ph' }, '♪'),
-        h('div', { class: 'upnext-meta' },
-          h('div', { class: 'upnext-title' }, t.title),
-          h('div', { class: 'upnext-sub' }, t.artist),
-        ),
-      ));
-    });
+    railEl.appendChild(h('div', { class: 'side-h upnext-head' },
+      `UP NEXT · ${s.queueTotal} in queue`,
+      s.queueTotal > 3 ? h('button', {
+        class: 'btn btn-mini upnext-toggle',
+        title: railOpen ? 'Back to the top 3' : 'Show the whole queue',
+        onclick: () => { railOpen = !railOpen; railSig = ''; },
+      }, railOpen ? '×' : '≡') : null,
+    ));
+    if (railOpen) {
+      // The whole queue, scrollable — the next 3 stay marked. With shuffle
+      // or smart the front is materialized, so what you see is what plays.
+      const wrap = h('div', { class: 'qfull' });
+      s.queue.forEach((t, i) => wrap.appendChild(queueEntryRow(t, i)));
+      railEl.appendChild(wrap);
+    } else {
+      next.forEach((t, i) => {
+        railEl.appendChild(h('div', { class: `upnext-card ${i === 0 ? 'q1' : ''}` },
+          h('span', { class: 'upnext-q' }, `Q${i + 1}`),
+          t.artworkUrl
+            ? setImage(h('img', { class: 'upnext-art', alt: '' }), t.artworkUrl)
+            : h('div', { class: 'upnext-art upnext-ph' }, '♪'),
+          h('div', { class: 'upnext-meta' },
+            h('div', { class: 'upnext-title' }, t.title),
+            h('div', { class: 'upnext-sub' }, t.artist),
+          ),
+          h('button', {
+            class: 'btn btn-mini btn-qdrop', title: 'Drop from the queue',
+            onclick: (e) => { e.stopPropagation(); queueOps && queueOps.remove(t.id); railSig = ''; },
+          }, '✕'),
+        ));
+      });
+    }
     if (!next.length) railEl.appendChild(h('div', { class: 'muted' }, 'Queue is empty.'));
     if (onQueueFromBrowser) {
       railEl.appendChild(h('button', {
         class: 'btn btn-ghost upnext-fill', onclick: () => onQueueFromBrowser(),
       }, '+ QUEUE FROM LIST'));
+    }
+    // Wavlake picks: chart tracks scored against what is playing right now —
+    // V4V suggestions the crowd can zap, one tap from the queue.
+    if (suggestions.length) {
+      railEl.appendChild(h('div', { class: 'side-h' }, 'WAVLAKE PICKS'));
+      suggestions.forEach((t) => {
+        railEl.appendChild(h('div', { class: 'upnext-card suggest-card' },
+          t.artworkUrl
+            ? setImage(h('img', { class: 'upnext-art', alt: '' }), t.artworkUrl)
+            : h('div', { class: 'upnext-art upnext-ph' }, '⚡'),
+          h('div', { class: 'upnext-meta' },
+            h('div', { class: 'upnext-title' }, t.title),
+            h('div', { class: 'upnext-sub' }, t.artist),
+          ),
+          h('button', {
+            class: 'btn btn-mini', title: 'Play next',
+            onclick: () => { queueOps && queueOps.promote(t); railSig = ''; },
+          }, '⤒'),
+        ));
+      });
     }
   }
 

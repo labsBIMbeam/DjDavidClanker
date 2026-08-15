@@ -14,6 +14,18 @@ const DIVISIONS = [
 ];
 
 /**
+ * Both wave lanes share ONE beat-window: `beats` beats of each deck's own
+ * tempo fill the lane, so a beat has the same pixel width on both lanes —
+ * zoom either lane and both follow, and matched decks run their beat lines
+ * flush above each other.
+ */
+export const laneView = { beats: 32 };
+
+export function setLaneBeats(b) {
+  laneView.beats = Math.max(8, Math.min(128, b));
+}
+
+/**
  * One deck panel. Owns its own canvas cache: the static waveform is rendered
  * once into an offscreen canvas on `peaks`, then blitted each frame with the
  * playhead drawn over it, so the rAF loop stays cheap.
@@ -21,36 +33,38 @@ const DIVISIONS = [
 export function DeckPanel(deck, { onZap, onEject, accent }) {
   const wave = h('canvas', { class: 'wave', height: 64 });
 
-  /* Wavedeck: the main canvas is ALWAYS a playhead-centered zoom window
-     (default ×8 of the track, range ×2–×64); the whole track lives on the
-     overview strip below it. */
-  const view = { zoom: 8 };
-  const zoomOut = h('button', { class: 'btn btn-mini zoom-out', title: 'Zoom the waveform out' }, '−');
-  const zoomLabel = h('button', { class: 'btn btn-mini zoom-fit', title: 'Reset zoom (×8)' }, '×8');
-  const zoomIn = h('button', { class: 'btn btn-mini zoom-in', title: 'Zoom the waveform in' }, '+');
+  /* Wavedeck: the main canvas is ALWAYS a playhead-centered window over the
+     SHARED beat-view (default 8 bars, range 2–32 bars); the whole track
+     lives on the overview strip below it. */
+  const zoomOut = h('button', { class: 'btn btn-mini zoom-out', title: 'Zoom both lanes out (more bars)' }, '−');
+  const zoomLabel = h('button', { class: 'btn btn-mini zoom-fit', title: 'Reset both lanes (8 bars)' }, '8 BARS');
+  const zoomIn = h('button', { class: 'btn btn-mini zoom-in', title: 'Zoom both lanes in (fewer bars)' }, '+');
   const zoomBox = h('div', { class: 'wave-zoom' }, zoomOut, zoomLabel, zoomIn);
   const waveWrap = h('div', { class: 'wave-wrap' }, wave, zoomBox);
 
-  function setZoom(z) {
-    view.zoom = Math.max(2, Math.min(64, z));
-    const zl = view.zoom;
-    zoomLabel.textContent = zl < 10 ? `×${zl.toFixed(1).replace(/\.0$/, '')}` : `×${Math.round(zl)}`;
-    waveWrap.dataset.zoom = String(Math.round(zl * 100) / 100);
+  /** Mirror the shared beat-view into this lane's label + dataset. */
+  function syncZoomUi() {
+    const bars = laneView.beats / 4;
+    const txt = bars >= 2 ? `${Math.round(bars)} BARS` : `${Math.round(laneView.beats)} BEATS`;
+    if (zoomLabel.textContent !== txt) zoomLabel.textContent = txt;
+    const ds = String(Math.round(laneView.beats * 100) / 100);
+    if (waveWrap.dataset.beats !== ds) waveWrap.dataset.beats = ds;
   }
-  zoomIn.addEventListener('click', () => setZoom(view.zoom * 1.5));
-  zoomOut.addEventListener('click', () => setZoom(view.zoom / 1.5));
-  zoomLabel.addEventListener('click', () => setZoom(8));
+  zoomIn.addEventListener('click', () => setLaneBeats(laneView.beats / 2));
+  zoomOut.addEventListener('click', () => setLaneBeats(laneView.beats * 2));
+  zoomLabel.addEventListener('click', () => setLaneBeats(32));
   waveWrap.addEventListener('wheel', (e) => {
     if (!deck.peaks) return;
     e.preventDefault();
-    setZoom(view.zoom * (e.deltaY < 0 ? 1.3 : 1 / 1.3));
+    setLaneBeats(laneView.beats * (e.deltaY < 0 ? 1 / 1.3 : 1.3));
   }, { passive: false });
-  setZoom(8);
+  syncZoomUi();
 
   /** Visible track window, centered on the playhead, clamped to the ends. */
   function viewWindow() {
     const dur = deck.duration || 1;
-    const span = dur / view.zoom;
+    const bpm = deck.effectiveBpm || deck.bpm || 120;
+    const span = Math.min(dur, laneView.beats * (60 / bpm));
     let t0 = deck.position - span / 2;
     t0 = Math.max(0, Math.min(dur - span, t0));
     return { t0, span };
@@ -331,9 +345,10 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
     );
 
   const FX_LABELS = {
-    flanger: 'FLANGER', phaser: 'PHASER', gater: 'GATER', echo: 'ECHO', reverb: 'REVERB',
-    chorus: 'CHORUS', tremolo: 'TREMOLO', autopan: 'AUTOPAN', drive: 'DRIVE', crush: 'CRUSH',
-    pingpong: 'PINGPONG', telephone: 'TELEPHONE', autowah: 'AUTOWAH', vowel: 'VOWEL', comb: 'COMB',
+    flanger: 'FLANGER', phaser: 'PHASER', barber: 'BARBER', gater: 'GATER', echo: 'ECHO',
+    reverb: 'REVERB', chorus: 'CHORUS', tremolo: 'TREMOLO', autopan: 'AUTOPAN', drive: 'DRIVE',
+    crush: 'CRUSH', pingpong: 'PINGPONG', telephone: 'TELEPHONE', autowah: 'AUTOWAH',
+    vowel: 'VOWEL', comb: 'COMB',
   };
   const ECHO_DIVISIONS = [
     ['1/16', 0.25],
@@ -384,6 +399,17 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
           depth,
           fxKnob('Fdbk', { min: 0, max: 0.9, step: 0.01, value: p.feedback, label: `${type} Feedback`, onInput: (v) => set({ feedback: v }) }),
           fxKnob('Mix', { min: 0, max: 1, step: 0.01, value: p.mix, label: `${type} Mix`, onInput: (v) => set({ mix: v }) }),
+        ),
+        sync: () => {},
+      };
+    }
+    if (type === 'barber') {
+      // The endless riser: rate of the climb, sweep depth, mix.
+      return {
+        el: h('div', { class: 'fx-body' },
+          fxKnob('Rate', { min: 0.03, max: 2, step: 0.01, value: p.rate, label: 'barber Rate', onInput: (v) => set({ rate: v }) }),
+          fxKnob('Depth', { min: 0, max: 1, step: 0.01, value: p.depth, label: 'barber Depth', onInput: (v) => set({ depth: v }) }),
+          fxKnob('Mix', { min: 0, max: 1, step: 0.01, value: p.mix, label: 'barber Mix', onInput: (v) => set({ mix: v }) }),
         ),
         sync: () => {},
       };
@@ -1065,14 +1091,23 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
     btnDrop.disabled = deck.backend !== 'buffer' || deck.status !== 'ready';
 
     for (const [b] of [[zoomIn], [zoomOut], [zoomLabel]]) b.disabled = !deck.peaks;
+    syncZoomUi(); // the other lane may have moved the shared beat-view
 
     const loopReady = deck.backend === 'buffer' && deck.status === 'ready';
     for (const b of [btnLoopIn, btnLoopOut, ...beatLoopBtns, btnLoopExit]) b.disabled = !loopReady;
     btnLoopOut.disabled = !loopReady || deck.loop.active;
 
-    const scratchReady = deck.canVinyl && Boolean(deck._reverse) && deck.bpm > 0;
+    // No BPM needed — the pattern engine falls back to a 120 grid. What IS
+    // needed: a decoded buffer (BASIC streams can't scratch) + the reverse copy.
+    const scratchReady = deck.canVinyl && Boolean(deck._reverse);
     btnScratchGo.disabled = !scratchReady;
     scratchSel.disabled = !scratchReady;
+    const scratchWhy = scratchReady
+      ? 'Throw the armed scratch move (the top MIDI pad does the same)'
+      : deck.backend !== 'buffer' && deck.status === 'ready'
+        ? 'Scratch needs decoded FULL audio — this deck runs a BASIC stream (standalone without a CORS proxy)'
+        : 'Scratch arms right after load, once the reverse buffer is built';
+    if (btnScratchGo.title !== scratchWhy) btnScratchGo.title = scratchWhy;
     btnTap.disabled = deck.backend !== 'buffer';
     beatLoopBtns.forEach((b, i) => b.classList.toggle('on', deck.loop.active && deck.loop.beats === LOOP_BEATS[i]));
     btnLoopExit.classList.toggle('on', deck.loop.active);
@@ -1136,6 +1171,7 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
     laneMst.classList.toggle('show', isMaster);
     btnKeylock.classList.toggle('on', deck.keylock);
     btnKeylock.disabled = !deck.mixer.keylockReady;
+    syncZoomUi(); // shared beat-view: the other lane's zoom moves this label too
     const lvl = deck.level();
     platter.style.boxShadow = deck.playing
       ? `0 0 ${Math.round(20 + lvl * 26)}px rgba(255, 106, 0, 0.32)` : '';
@@ -1178,7 +1214,7 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
       staticWave = null;
       record.invalidate();
     }
-    if (what === 'load') setZoom(8);
+    if (what === 'load') syncZoomUi(); // shared view survives loads on purpose
     if (what === 'tap') {
       const n = deck._taps.length;
       btnTap.textContent = n > 0 && n < 4 ? `TAP ${n}` : 'TAP';
@@ -1196,7 +1232,7 @@ export function DeckPanel(deck, { onZap, onEject, accent }) {
 
   render();
   return {
-    root, roots, top, bottom, channelStrip, lane, render, tick, setZoom,
+    root, roots, top, bottom, channelStrip, lane, render, tick,
     tempoFader, pitchFader: tempoFader, volFader,
   };
 }

@@ -59,6 +59,8 @@ export class Automix {
     this.queue = [];
     this.cursor = 0;
     this.history = [];
+    this._look = 0; // queue front resolved up to here (shuffle/smart lookahead)
+    this._lookOrder = 'list';
 
     this.liveId = null; // 'A' | 'B'
     this.fade = null; // { t, dur, from, to } — the legacy crossfade
@@ -92,7 +94,72 @@ export class Automix {
   setQueue(tracks, { keepPosition = false } = {}) {
     this.queue = (tracks || []).filter(Boolean);
     if (!keepPosition) this.cursor = 0;
+    this._look = this.cursor;
     this.onStatus('queue');
+  }
+
+  /**
+   * Materialize the next picks for shuffle/smart INTO the queue front, so
+   * the UP NEXT rail shows the truth instead of a list-order fiction and a
+   * promoted track actually stays where the DJ pinned it. `_look` marks how
+   * far the front is resolved; consuming and editing move it along.
+   */
+  ensureLookahead(n = 3) {
+    if (this._lookOrder !== this.order) {
+      this._look = this.cursor;
+      this._lookOrder = this.order;
+    }
+    if (this.order === 'list') { this._look = this.cursor; return; }
+    if (this._look < this.cursor) this._look = this.cursor;
+    const end = Math.min(this.queue.length, this.cursor + n);
+    const liveId = this.liveId && this.mixer.decks[this.liveId].track
+      && this.mixer.decks[this.liveId].track.id;
+    while (this._look < end) {
+      const idx = this._look;
+      let pickIdx = idx;
+      if (this.order === 'shuffle') {
+        for (let i = 0; i < 8; i++) {
+          const c = idx + Math.floor(Math.random() * (this.queue.length - idx));
+          if (!this.queue[c] || this.queue[c].id !== liveId) { pickIdx = c; break; }
+        }
+      } else {
+        pickIdx = this._bestFrom(idx);
+      }
+      if (pickIdx > idx) {
+        const [t] = this.queue.splice(pickIdx, 1);
+        this.queue.splice(idx, 0, t);
+      }
+      this._look++;
+    }
+  }
+
+  /**
+   * Put a track right behind the playhead — from the queue (moves) or from
+   * any browser list (inserts). Pure array surgery, playback untouched.
+   */
+  promote(track) {
+    if (!track || !track.id) return false;
+    const i = this.queue.findIndex((t, k) => k >= this.cursor && t && t.id === track.id);
+    if (i === this.cursor) return true;
+    if (i > this.cursor) {
+      const [t] = this.queue.splice(i, 1);
+      this.queue.splice(this.cursor, 0, t);
+      if (this._look <= i) this._look = Math.max(this._look, this.cursor + 1);
+      return true;
+    }
+    this.queue.splice(this.cursor, 0, track);
+    if (this._look > this.cursor) this._look++;
+    else this._look = this.cursor + 1;
+    return true;
+  }
+
+  /** Drop a queued track (first match at/after the cursor). */
+  removeFromQueue(id) {
+    const i = this.queue.findIndex((t, k) => k >= this.cursor && t && t.id === id);
+    if (i < 0) return false;
+    this.queue.splice(i, 1);
+    if (i < this._look) this._look--;
+    return true;
   }
 
   get remainingInQueue() {
@@ -120,6 +187,11 @@ export class Automix {
         return null;
       }
     }
+    // A materialized front (shuffle/smart lookahead) IS the decision — the
+    // rail promised it, so consume it in order.
+    if (this.order !== 'list' && this._look > this.cursor) {
+      return this.queue[this.cursor++] || null;
+    }
     if (this.order === 'smart') {
       const pick = this._takeSmart();
       if (pick) return pick;
@@ -143,29 +215,46 @@ export class Automix {
    * every score is identical and this IS list order.
    */
   _takeSmart() {
-    const live = this.liveDeck;
-    if (!live || !live.bpm) return null; // cold start: the list head is fine
-    const liveSummary = {
-      bpm: live.bpm,
-      camelot: live.musicalKey ? live.musicalKey.camelot : '',
-      energyOut: live.structure && live.structure.ok ? live.structure.energyOut : NaN,
-    };
-    const recent = this.history.slice(-20).map((t) => t.id);
-    let bestIdx = -1;
-    let bestScore = -Infinity;
-    const window = Math.min(12, this.queue.length - this.cursor);
-    for (let i = 0; i < window; i++) {
-      const cand = this.queue[this.cursor + i];
-      if (!cand) continue;
-      const s = scoreCandidate(liveSummary, summaryFor(cand), recent, trackCacheId(cand));
-      if (s > bestScore + 1e-9) {
-        bestScore = s;
-        bestIdx = this.cursor + i;
-      }
-    }
+    const bestIdx = this._bestFrom(this.cursor);
     if (bestIdx < 0) return null;
     const [pick] = this.queue.splice(bestIdx, 1);
     return pick || null;
+  }
+
+  /**
+   * Best continuation index at/after `from`. The reference is the live deck
+   * for the first slot and the previously resolved queue entry further out,
+   * so a materialized chain scores each hop against its actual predecessor.
+   * With nothing analyzed every score ties and this IS list order.
+   */
+  _bestFrom(from) {
+    let ref = null;
+    if (from > this.cursor && this.queue[from - 1]) {
+      ref = summaryFor(this.queue[from - 1]);
+    } else {
+      const live = this.liveDeck;
+      if (!live || !live.bpm) return from < this.queue.length ? from : -1;
+      ref = {
+        bpm: live.bpm,
+        camelot: live.musicalKey ? live.musicalKey.camelot : '',
+        energyOut: live.structure && live.structure.ok ? live.structure.energyOut : NaN,
+      };
+    }
+    if (!ref || !(ref.bpm > 0)) return from < this.queue.length ? from : -1;
+    const recent = this.history.slice(-20).map((t) => t.id);
+    let bestIdx = -1;
+    let bestScore = -Infinity;
+    const window = Math.min(12, this.queue.length - from);
+    for (let i = 0; i < window; i++) {
+      const cand = this.queue[from + i];
+      if (!cand) continue;
+      const s = scoreCandidate(ref, summaryFor(cand), recent, trackCacheId(cand));
+      if (s > bestScore + 1e-9) {
+        bestScore = s;
+        bestIdx = from + i;
+      }
+    }
+    return bestIdx;
   }
 
   /* ------------------------------ control ------------------------------ */
@@ -302,6 +391,9 @@ export class Automix {
   }
 
   tick(dt) {
+    // The rail reads the queue even while automix is off — keep the
+    // shuffle/smart front resolved regardless of `enabled`.
+    this.ensureLookahead();
     if (!this.enabled || this.busy) return;
     const decks = this.mixer.decks;
 

@@ -3,7 +3,7 @@ import './styles.css';
 import { Mixer } from './audio/engine.js';
 import { Automix } from './audio/automix.js';
 import { Performer } from './audio/performer.js';
-import { DeckPanel } from './ui/deck.js';
+import { DeckPanel, laneView, setLaneBeats } from './ui/deck.js';
 import { AutomixBar } from './ui/automixbar.js';
 import { MixerStrip } from './ui/mixer.js';
 import { Browser } from './ui/browser.js';
@@ -88,13 +88,67 @@ document.body.appendChild(vis.canvas);
 const applyStage = (on) => {
   document.body.classList.toggle('stage-view', on);
   btnStage.classList.toggle('on', on);
-  vis.setActive(on);
+  // Draw for the stage OR a live pop-out; show on-page only in stage view.
+  vis.setActive(on || Boolean(popWin && !popWin.closed), { show: on });
 };
 const btnStage = h('button', {
   class: 'btn btn-mini btn-stage',
   title: 'Stage view for the second screen: waves, decks and the visualizer — the crowd does not need the browser',
   onclick: () => applyStage(!document.body.classList.contains('stage-view')),
 }, '⛶ STAGE');
+
+// Pop-out visuals: the ZapViz canvas mirrored into its OWN window via
+// captureStream, so the beamer gets full-screen visuals while this window
+// stays the desk. Popups need a real window context — devices-mode shell or
+// standalone; the plain napplet sandbox refuses window.open, same policy as
+// every other media capability here.
+let popWin = null;
+let popTimer = 0;
+function closePop() {
+  clearInterval(popTimer);
+  popTimer = 0;
+  if (popWin && !popWin.closed) { try { popWin.close(); } catch { /* gone */ } }
+  popWin = null;
+  btnPop.classList.remove('on');
+  const stage = document.body.classList.contains('stage-view');
+  vis.setActive(stage, { show: stage });
+}
+function togglePop() {
+  if (popWin && !popWin.closed) { closePop(); return; }
+  let win = null;
+  try { win = window.open('', 'clanker-visuals', 'width=960,height=540'); } catch { win = null; }
+  if (!win) {
+    toast('Pop-out blocked — visuals need the devices-mode shell (?devices=1) or standalone.', 'warn');
+    return;
+  }
+  try {
+    const doc = win.document;
+    doc.title = 'DJ DAVID CLANKER — VISUALS';
+    doc.body.style.cssText = 'margin:0;background:#0d0b09;overflow:hidden;cursor:none';
+    const v = doc.createElement('video');
+    v.muted = true;
+    v.autoplay = true;
+    v.playsInline = true;
+    v.style.cssText = 'width:100vw;height:100vh;object-fit:cover;display:block';
+    doc.body.appendChild(v);
+    v.srcObject = vis.canvas.captureStream(30);
+    v.play().catch(() => {});
+  } catch {
+    try { win.close(); } catch { /* opaque sandbox window */ }
+    toast('Pop-out blocked — visuals need the devices-mode shell (?devices=1) or standalone.', 'warn');
+    return;
+  }
+  popWin = win;
+  btnPop.classList.add('on');
+  vis.setActive(true, { show: document.body.classList.contains('stage-view') });
+  // No close event crosses windows reliably — poll the flag instead.
+  popTimer = setInterval(() => { if (!popWin || popWin.closed) closePop(); }, 800);
+}
+const btnPop = h('button', {
+  class: 'btn btn-mini btn-pop',
+  title: 'Visuals in their own window — drag it onto the beamer, the desk stays here',
+  onclick: togglePop,
+}, '⧉ 2ND');
 if (new URLSearchParams(location.search).has('stage')) applyStage(true);
 
 const header = h('header', { class: 'app-head' },
@@ -104,7 +158,7 @@ const header = h('header', { class: 'app-head' },
     h('span', { class: 'brand-sub' }, 'wavlake · v4v · two decks'),
   ),
   onAirChip,
-  h('div', { class: 'head-right' }, btnStage, btnRec, recTime, modeEl, identityEl,
+  h('div', { class: 'head-right' }, btnStage, btnPop, btnRec, recTime, modeEl, identityEl,
     h('button', { class: 'btn btn-mini', title: 'Shortcuts & info', onclick: showHelp }, '?'),
   ),
 );
@@ -134,12 +188,11 @@ const divider = h('div', { class: 'wave-divider' },
   h('span', { class: 'beat-dots' }, ...beatDots),
   phaseText,
   h('span', { class: 'divider-spacer' }),
-  h('button', { class: 'btn btn-mini', title: 'Zoom both lanes out', onclick: () => { panelA.setZoom(zoomOf() / 1.35); panelB.setZoom(zoomOf() / 1.35); } }, '−'),
-  h('button', { class: 'btn btn-mini', title: 'Reset both lanes to ×8', onclick: () => { panelA.setZoom(8); panelB.setZoom(8); } }, '×8'),
-  h('button', { class: 'btn btn-mini', title: 'Zoom both lanes in', onclick: () => { panelA.setZoom(zoomOf() * 1.35); panelB.setZoom(zoomOf() * 1.35); } }, '+'),
+  h('button', { class: 'btn btn-mini', title: 'Zoom both lanes out (more bars)', onclick: () => setLaneBeats(laneView.beats * 2) }, '−'),
+  h('button', { class: 'btn btn-mini', title: 'Reset both lanes (8 bars)', onclick: () => setLaneBeats(32) }, '8b'),
+  h('button', { class: 'btn btn-mini', title: 'Zoom both lanes in (fewer bars)', onclick: () => setLaneBeats(laneView.beats / 2) }, '+'),
   syncChip,
 );
-const zoomOf = () => parseFloat(panelA.lane.querySelector('.wave-wrap').dataset.zoom) || 8;
 
 // Order per the design + the user's revision: waves only in the stack, the
 // crossfader right beneath them, then the automix ticker, then one deck
@@ -253,10 +306,26 @@ const browser = Browser({
       audible: mixer.decks.B.playing && mixer.crossValue('B') > 0.12,
       playing: mixer.decks.B.playing,
     },
-    queue: automix.queue.slice(automix.cursor, automix.cursor + 40),
+    queue: automix.queue.slice(automix.cursor, automix.cursor + 200),
+    queueTotal: Math.max(0, automix.queue.length - automix.cursor),
+    order: automix.order,
     playedIds: automix.history.slice(-40).map((t) => t.id),
+    liveSummary: (() => {
+      const d = automix.liveId ? mixer.decks[automix.liveId]
+        : (mixer.decks.A.playing ? mixer.decks.A : (mixer.decks.B.playing ? mixer.decks.B : null));
+      if (!d || !d.bpm) return null;
+      return {
+        bpm: d.bpm,
+        camelot: d.musicalKey ? d.musicalKey.camelot : '',
+        energyOut: d.structure && d.structure.ok ? d.structure.energyOut : NaN,
+      };
+    })(),
   }),
   onQueueFromBrowser: () => automix.setQueue(browser.currentItems()),
+  queueOps: {
+    promote: (track) => automix.promote(track),
+    remove: (id) => automix.removeFromQueue(id),
+  },
 });
 
 const automix = new Automix(mixer, {
@@ -361,12 +430,14 @@ for (const id of ['A', 'B']) {
       }
     }
     if (what === 'load') {
-      // A setlist track brings its marks back onto the deck.
+      // A setlist track brings its marks back onto the deck. Real marks pin
+      // the cue as manual; an empty record leaves the downbeat default alone.
       const t = deck.track;
       const c = t && savedSet.cuesFor(t.id);
       if (c) {
         deck.cuePoint = c.cue || 0;
         deck.hotCues = [...(c.hot || [null, null, null, null])];
+        if (c.cue > 0 || deck.hotCues.some((x) => x != null)) deck._cueManual = true;
       }
     }
     if (what === 'master-request') {
@@ -781,14 +852,27 @@ window.__djclanker = {
 let lastFrame = 0;
 let lastPoke = 0;
 let lastBrowserTick = 0;
+// One deck's paint crashing must never freeze the sibling's controls in
+// whatever disabled state the last good tick left them — isolate each panel.
+const panelTickErr = { A: false, B: false };
+function tickPanel(panel, id) {
+  try {
+    panel.tick();
+  } catch (e) {
+    if (!panelTickErr[id]) {
+      panelTickErr[id] = true;
+      console.error(`deck ${id} panel tick failed`, e);
+    }
+  }
+}
 function frame(now) {
   const dt = lastFrame ? Math.min(0.25, (now - lastFrame) / 1000) : 0;
   lastFrame = now;
   mixer.tickAudio(); // platter physics + gater scheduling
   automix.tick(dt);
   performer.tick(dt);
-  panelA.tick();
-  panelB.tick();
+  tickPanel(panelA, 'A');
+  tickPanel(panelB, 'B');
   strip.tick();
   automixBar.tick();
   tickWavedeck();

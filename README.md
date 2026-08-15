@@ -37,21 +37,35 @@ network access to a host shell.
   stationary (a co-rotating waveform is unreadable), the played part glows,
   a needle marker shows the position.
 - **Wavedeck stage**: both waveforms as a mirrored, edge-to-edge pair at the
-  top — always a playhead-centered zoom window (default ×8, wheel/−/+ for
-  ×2–×64) over a full-track overview strip, with beat/bar markers anchored
-  to the detected downbeat. Drag scrubs the wave under the fixed playhead,
-  click jumps; a shared beat row (beat dots, phase, sync chip) sits under
-  the seam. Empty lanes run the 600B matrix rain
-- CUE with CDJ logic (set while stopped, jump back while playing), plus
-  **4 hot cues** per deck: empty pad stores, set pad jumps (fires from
-  stop), double-click clears — drawn as numbered ember pins on the zoom
-  wave and as ticks on the overview strip
+  top — always a playhead-centered window over a full-track overview strip,
+  with beat/bar markers anchored to the detected downbeat. The lanes share
+  **one beat-view** (default 8 bars, wheel/−/+ for 2–32 bars): zoom either
+  lane and both follow, a beat has the same pixel width on both decks, and
+  matched decks run their beat lines flush above each other. Drag scrubs the
+  wave under the fixed playhead, click jumps; a shared beat row (beat dots,
+  phase, sync chip) sits under the seam. Empty lanes run the 600B matrix rain
+- **CUE returns to your mark, never to 0:00**: storing a hot cue also arms
+  the main cue there; before any mark is set, analysis parks the cue on the
+  first downbeat. While playing, CUE stops and snaps back to that mark;
+  while stopped it re-arms at the playhead (CDJ logic). Plus **4 hot cues**
+  per deck: empty pad stores, set pad jumps — and only jumps, never
+  autostarts the deck — double-click clears. Drawn as numbered ember pins
+  on the zoom wave and as ticks on the overview strip
 - **● REC**: record the master bus; stopping downloads the whole set as a
   webm/opus file. **⚡ SHOW**: one button arms the full autopilot — queue,
   automix with SMART order, performer riding on top
 - **⛶ STAGE + visualizer**: the beamer face runs a ZapViz-style feedback
   visualizer behind the decks — auto-drifting trails, noise sparkles and
-  five audio-reactive presets rotating on their own, Winamp automode style
+  six audio-reactive presets rotating on their own, Winamp automode style.
+  The **600 head lives inside it**: it breathes in the spectral crown,
+  orbits the scope ring, rains as confetti, fronts the infinite tunnel and
+  swarms in the logo-storm preset. A beat clock read off the audible deck's
+  grid pumps the feedback zoom on every beat and slams a screen-filling,
+  RGB-torn head with a shockwave ring on every bar-1 — ridiculous on
+  purpose, and exactly in time
+- **⧉ 2ND**: pops the visuals into their own window (canvas captureStream →
+  full-window video) — drag it onto the beamer, the desk stays here. Needs
+  a real window context: devices-mode shell or standalone
 - **Beat loops**: IN/OUT for manual loops, 1/2/4/8 snap onto the detected
   grid, EXIT leaves
 - **Tempo fader** ±8 / ±16 / ±50 %, BPM detection with beat phase and 4/4
@@ -61,20 +75,32 @@ network access to a host shell.
   bending the pitch: a granular worklet corrects it back live
 - **Quantized DROP**: starts the deck sample-accurately on the other deck's
   next bar-1
+- **Queue you can trust**: the UP NEXT rail names the real count, `≡` opens
+  the whole queue, ✕ drops and ⤒ pins a track right behind the playhead —
+  from the queue or from any browser row. With SHUF/SMART the engine
+  resolves its next three picks in advance, so what the rail shows is what
+  will play. **WAVLAKE PICKS** suggests chart tracks matched to the running
+  deck (key/BPM scoring) — one tap into the queue, zappable by the crowd
 - 3-band EQ with kill, bipolar filter sweep (LP ↔ HP), trim with auto-gain
 - Channel fader plus VU meter per deck
 
-**FX per deck** (insert after the filter) — **15 units** in a fixed rack:
-flanger, phaser, chorus, gater, tremolo, autopan, drive, bitcrush, echo,
-ping-pong delay (both tempo-synced), reverb, and the special filters —
-telephone, auto-wah, vowel/formant morph (A–U), comb. Two switchable slots
-pick which units the buttons drive; on the MPD218 it is one hand per slot:
-K3/K4 turn slot 1 (the unit's primary amount — zero releases it), the FX2
-pads toggle slot 2.
-- **5 effects in 2 switchable slots**: flanger, phaser, gater, echo, reverb.
-  A dropdown per slot picks which effect the button (or F/G/H/J) toggles;
-  picking an effect already in the other slot swaps the slots.
+**FX per deck** (insert after the filter) — **16 units** in a fixed rack:
+flanger, phaser, **barber** (barberpole phaser — two staggered allpass
+voices hand a sawtooth sweep back and forth, the riser that never arrives),
+chorus, gater, tremolo, autopan, drive, bitcrush, echo, ping-pong delay
+(both tempo-synced), reverb, and the special filters — telephone, auto-wah,
+vowel/formant morph (A–U), comb. Two switchable slots pick which units the
+buttons drive; on the MPD218 it is one hand per slot: K3/K4 turn slot 1
+(the unit's primary amount — zero releases it), the FX2 pads toggle slot 2.
+**Barber boots in slot 1 on both decks**, so the rotary pulls up the endless
+riser before anyone opens the rack.
+- **2 switchable slots** out of the 16-unit rack: a dropdown per slot picks
+  which effect the button (or F/G/H/J) toggles; picking an effect already
+  in the other slot swaps the slots.
 - **Flanger**: modulated short delay with feedback — rate, depth, feedback, mix
+- **Barber**: barberpole phaser — two 4-stage allpass voices, each driven by
+  its own sawtooth sweep and faded by a sine window half a period apart; the
+  ear hears a riser that never arrives (Shepard-tone trick, phaser edition)
 - **Gater**: tempo-synced to the deck BPM — division 1/4…1/32, duty, depth,
   soft edges. The gain automation is scheduled 0.4 s ahead so the edges land
   sample-accurately and main-thread jitter doesn't matter.
@@ -347,7 +373,7 @@ src/
   audio/
     engine.js           mixer + deck, two backends, platter physics
     scratch.js          granular turntable + reversed buffer
-    fx.js               5 insert FX: flanger, phaser, gater, echo, reverb
+    fx.js               16 insert FX incl. barberpole phaser + channel filter
     automix.js          auto-DJ state machine
     analyze.js          waveform peaks, RMS, BPM estimation
   ui/

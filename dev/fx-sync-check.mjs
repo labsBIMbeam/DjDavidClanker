@@ -73,12 +73,14 @@ check('BPM display follows the tempofader', Math.abs(liveAfter - liveBefore * 1.
 const baseShown = parseFloat(await frame.locator('.deck-A .bpm-input').inputValue());
 check('base BPM field stays at track tempo', Math.abs(baseShown - det.bpmA) < 0.06, `base=${baseShown}`);
 
-/* ---------------------------- waveform zoom ---------------------------- */
+/* ------------------------- linked wave-lane zoom ------------------------- */
 
-await frame.locator('.deck-A .zoom-in').click();
-await frame.locator('.deck-A .zoom-in').click();
-const z1 = parseFloat(await frame.locator('.deck-A .wave-wrap').getAttribute('data-zoom'));
-check('waveform zooms via buttons', z1 > 2, `×${z1}`);
+// One shared beat-window drives BOTH lanes: wheel or button on either lane
+// moves the pair, and beats keep the same pixel width across decks.
+const beatsOf = () => frame.evaluate(() => [
+  parseFloat(document.querySelector('.deck-A .wave-wrap').dataset.beats),
+  parseFloat(document.querySelector('.deck-B .wave-wrap').dataset.beats),
+]);
 
 // Page coordinates for the raw wheel gesture: iframe rect + in-frame rect
 // (boundingBox on sandboxed-iframe elements is frame-relative here; the
@@ -89,17 +91,26 @@ const wb = await frame.evaluate(() => {
   const b = document.querySelector('.deck-A .wave-wrap').getBoundingClientRect();
   return { x: b.x, y: b.y, width: b.width, height: b.height };
 });
+const b0 = await beatsOf();
 await page.mouse.move(frameEl.x + wb.x + wb.width / 2, frameEl.y + wb.y + wb.height / 2);
 await page.mouse.wheel(0, -240);
-await page.waitForTimeout(200);
-const z2 = parseFloat(await frame.locator('.deck-A .wave-wrap').getAttribute('data-zoom'));
-check('mouse wheel zooms the waveform', z2 > z1, `×${z1} → ×${z2}`);
+await page.waitForTimeout(250);
+const b1 = await beatsOf();
+check('mouse wheel zooms BOTH lanes (shared beat-view)',
+  b1[0] < b0[0] && Math.abs(b1[0] - b1[1]) < 0.01,
+  `${b0[0]} beats → A=${b1[0]} B=${b1[1]}`);
 
-const seekInfo = await frame.evaluate(() => ({
-  pos: window.__djclanker.decks.A.position,
-  dur: window.__djclanker.decks.A.duration,
-}));
-const zspan = seekInfo.dur / z2;
+await frame.locator('.deck-A .zoom-in').click();
+await page.waitForTimeout(250);
+const b2 = await beatsOf();
+check('one zoom button drives both decks', b2[0] < b1[0] && Math.abs(b2[0] - b2[1]) < 0.01,
+  `A=${b2[0]} B=${b2[1]} beats`);
+
+const seekInfo = await frame.evaluate(() => {
+  const A = window.__djclanker.decks.A;
+  return { pos: A.position, dur: A.duration, bpm: A.effectiveBpm || A.bpm || 120 };
+});
+const zspan = Math.min(seekInfo.dur, b2[0] * (60 / seekInfo.bpm));
 const zt0 = Math.max(0, Math.min(seekInfo.dur - zspan, seekInfo.pos - zspan / 2));
 await frame.locator('.deck-A .wave-wrap').click({ position: { x: wb.width * 0.3, y: 60 } });
 await page.waitForTimeout(250);
@@ -108,8 +119,9 @@ check('click seeks inside the zoom window', Math.abs(seekAfter - (zt0 + 0.3 * zs
   `pos=${seekAfter.toFixed(1)}s ≈ ${(zt0 + 0.3 * zspan).toFixed(1)}s`);
 
 await frame.locator('.deck-A .zoom-fit').click();
-const z3 = parseFloat(await frame.locator('.deck-A .wave-wrap').getAttribute('data-zoom'));
-check('reset returns to the wave-lane default ×8', z3 === 8, `×${z3}`);
+await page.waitForTimeout(250);
+const b3 = await beatsOf();
+check('reset returns both lanes to 8 bars', b3[0] === 32 && b3[1] === 32, `${b3.join('/')} beats`);
 await frame.evaluate(() => {
   const f = document.querySelector('.deck-A input.pitch');
   f.value = '0';
@@ -119,16 +131,26 @@ await frame.evaluate(() => {
 /* ------------------------------ FX slots ------------------------------ */
 
 const slots0 = await frame.evaluate(() => window.__djclanker.decks.A.fxSlots.slice());
-check('default slots are flanger + gater', slots0[0] === 'flanger' && slots0[1] === 'gater', slots0.join('+'));
+check('default slots are barber + gater (MIDI knob live from boot)',
+  slots0[0] === 'barber' && slots0[1] === 'gater', slots0.join('+'));
 
-await frame.locator('.deck-A .fx-sel').first().selectOption('echo');
+// Swap slot 1 away and back — the dropdown must drive the engine both ways.
+await frame.locator('.deck-A .fx-sel').first().selectOption('flanger');
+await page.waitForTimeout(200);
+const swapAway = await frame.evaluate(() => window.__djclanker.decks.A.fxSlots.slice());
+await frame.locator('.deck-A .fx-sel').first().selectOption('barber');
 await page.waitForTimeout(200);
 const afterSel = await frame.evaluate(() => {
   const d = window.__djclanker.decks.A;
-  return { slots: d.fxSlots.slice(), hasUnits: Boolean(d._graph.echo && d._graph.reverb && d._graph.phaser) };
+  return { slots: d.fxSlots.slice(), hasUnits: Boolean(d._graph.echo && d._graph.reverb && d._graph.barber) };
 });
-check('slot 1 switched to echo', afterSel.slots[0] === 'echo', afterSel.slots.join('+'));
+check('slot 1 swaps to another unit and back', swapAway[0] === 'flanger' && afterSel.slots[0] === 'barber',
+  `${swapAway.join('+')} → ${afterSel.slots.join('+')}`);
 check('all five FX units live in the graph', afterSel.hasUnits);
+
+// The echo block below needs echo IN slot 1 — put it there explicitly.
+await frame.locator('.deck-A .fx-sel').first().selectOption('echo');
+await page.waitForTimeout(200);
 
 await frame.locator('.deck-A .btn-fx').first().click();
 await page.waitForTimeout(1200);
@@ -156,7 +178,7 @@ await page.keyboard.press('f');
 await frame.evaluate(() => {
   const d = window.__djclanker.decks.A;
   d.toggleFx('echo', false);
-  d.setFxSlot(0, 'flanger');
+  d.setFxSlot(0, 'barber'); // back to the boot default
   d.setFxSlot(1, 'gater');
 });
 
@@ -491,6 +513,36 @@ check('keylock corrects pitch by the inverse playback rate',
 check('keylock off returns the worklet to plain copy',
   key.ready && Math.abs(key.ratioOff - 1) < 0.002, key.ready ? `${key.ratioOff}` : 'n/a');
 
+// Deck B has never been cued by hand in this suite — its cue must sit on the
+// analysis default: the first downbeat, not 0:00.
+const cueDef = await frame.evaluate(() => {
+  const B = window.__djclanker.decks.B;
+  const anchor = Number.isFinite(B.barOffset) ? B.barOffset : B.beatOffset;
+  return { cue: B.cuePoint, anchor, manual: B._cueManual };
+});
+check('untouched deck parks its cue on the first downbeat', !cueDef.manual
+  && Number.isFinite(cueDef.anchor) && cueDef.cue > 0 && Math.abs(cueDef.cue - cueDef.anchor) < 0.01,
+  `cue=${cueDef.cue.toFixed(3)}s, bar-1=${cueDef.anchor && cueDef.anchor.toFixed(3)}s`);
+
+// Deck B's own SCRATCH button — the suite used to cover deck A only, and a
+// B-side UI break sailed straight through the board.
+const bScr = await frame.evaluate(async () => {
+  const B = window.__djclanker.decks.B;
+  if (!B.playing) B.toggle();
+  const btn = document.querySelector('.deck-B .btn-scratch-go')
+    || document.querySelectorAll('.btn-scratch-go')[1];
+  btn.click();
+  await new Promise((r) => setTimeout(r, 800));
+  const during = { auto: B.autoScratching, mode: B._mode };
+  btn.click();
+  await new Promise((r) => setTimeout(r, 500));
+  B.pause();
+  return { during, after: B.autoScratching };
+});
+check('deck B scratch fires from its UI button',
+  bScr.during.auto && bScr.during.mode === 'platter' && !bScr.after,
+  `during=${bScr.during.mode} stopped=${!bScr.after}`);
+
 /* ------------------------------ hot cues ------------------------------ */
 
 const hc = await frame.evaluate(async () => {
@@ -499,23 +551,86 @@ const hc = await frame.evaluate(async () => {
   A.seek(30);
   A.hotCue(0); // empty pad stores
   const stored = A.hotCues[0];
+  const cueArmed = Math.abs(A.cuePoint - stored) < 0.01; // storing arms the main cue
   A.seek(60);
-  A.hotCue(0); // set pad jumps — and fires from stop, CDJ style
-  await new Promise((r) => setTimeout(r, 300)); // let playback + a UI tick land
+  A.hotCue(0); // set pad JUMPS — and only jumps, no autostart (booth rule)
+  await new Promise((r) => setTimeout(r, 300)); // let the seek + a UI tick land
   const jumped = Math.abs(A.position - stored) < 1.5;
   const playing = A.playing;
   const uiSet = document.querySelector('.deck-top.deck-A .btn-hotcue').classList.contains('set');
   A.clearHotCue(0);
   const cleared = A.hotCues[0] === null;
   A.pause();
-  return { stored, jumped, playing, uiSet, cleared };
+  return { stored, cueArmed, jumped, playing, uiSet, cleared };
 });
+check('storing a hot cue arms the main cue', hc.cueArmed, `cue rides at ${hc.stored}s`);
 check('hot cue: empty pad stores the position', typeof hc.stored === 'number' && Math.abs(hc.stored - 30) < 0.5,
   `stored=${hc.stored}`);
-check('hot cue: set pad jumps and fires from stop', hc.jumped && hc.playing,
-  `jumped=${hc.jumped} playing=${hc.playing}`);
+check('hot cue: set pad jumps WITHOUT autostarting', hc.jumped && !hc.playing,
+  `jumped=${hc.jumped} stayedStopped=${!hc.playing}`);
 check('hot cue: pad lights while set, clear empties it', hc.uiSet && hc.cleared,
   `ui=${hc.uiSet} cleared=${hc.cleared}`);
+
+// CUE while playing must come back to the armed mark — never to 0:00.
+const cueRet = await frame.evaluate(async () => {
+  const A = window.__djclanker.decks.A;
+  A.pause();
+  A.seek(24);
+  A.hotCue(1); // store → arms the main cue here
+  const armed = A.cuePoint;
+  A.play({ instant: true });
+  await new Promise((r) => setTimeout(r, 1200));
+  const wandered = A.position;
+  A.cue(); // playing → pause + return
+  const back = !A.playing && Math.abs(A.position - armed) < 0.05;
+  A.clearHotCue(1);
+  return { armed, wandered, back, pos: A.position };
+});
+check('CUE returns to the hot-cue mark, not 0:00',
+  cueRet.back && Math.abs(cueRet.armed - 24) < 0.5,
+  `wandered to ${cueRet.wandered.toFixed(1)}s, CUE → ${cueRet.pos.toFixed(2)}s`);
+
+// The ⧉ 2ND pop-out needs a real window context; in the plain napplet
+// sandbox it must refuse politely instead of crashing or half-opening.
+const pop = await frame.evaluate(() => {
+  const btn = document.querySelector('.btn-pop');
+  if (!btn) return { present: false };
+  btn.click();
+  return { present: true, alive: Boolean(window.__djclanker), on: btn.classList.contains('on') };
+});
+check('visuals pop-out gates gracefully in the plain sandbox',
+  pop.present && pop.alive && !pop.on,
+  pop.present ? `blocked cleanly, app alive=${pop.alive}` : 'button missing');
+
+// Barber: the boot-default riser must actually sweep — two staggered voices,
+// sweep depth live when on, silent when off.
+const barber = await frame.evaluate(async () => {
+  const A = window.__djclanker.decks.A;
+  A.toggleFx('barber', true);
+  await new Promise((r) => setTimeout(r, 250));
+  const u = A._graph.barber;
+  const on = { voices: u.voices.length, sweep: u.voices[0].sweep.gain.value, wet: u.wet.gain.value };
+  A.toggleFx('barber', false);
+  await new Promise((r) => setTimeout(r, 250));
+  return { on, offSweep: u.voices[0].sweep.gain.value };
+});
+check('barber sweeps with two staggered voices', barber.on.voices === 2
+  && barber.on.sweep > 300 && barber.on.wet > 0.3 && barber.offSweep < 60,
+  `voices=${barber.on.voices} sweep=${barber.on.sweep.toFixed(0)}Hz wet=${barber.on.wet.toFixed(2)}`);
+
+// Stage view arms the visualizer WITH the 600 head loaded.
+const vz = await frame.evaluate(async () => {
+  const dj = window.__djclanker;
+  document.querySelector('.btn-stage').click();
+  for (let i = 0; i < 20 && !(dj.vis.active && dj.vis.logoReady); i++) {
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  const state = { active: dj.vis.active, logo: dj.vis.logoReady };
+  document.querySelector('.btn-stage').click();
+  return state;
+});
+check('stage visualizer arms with the 600 head', vz.active && vz.logo,
+  `active=${vz.active} logoReady=${vz.logo}`);
 
 await page.screenshot({ path: `${OUT}-decks.png`, fullPage: true });
 await browser.close();

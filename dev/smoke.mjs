@@ -198,9 +198,9 @@ await frame.locator('.deck-A .btn-fx').nth(1).click();
 await page.waitForTimeout(1200);
 const fxState = await frame.evaluate(() => {
   const d = window.__djclanker.decks.A;
-  return { fl: d.fx.flanger.on, ga: d.fx.gater.on, graph: Boolean(d._graph && d._graph.flanger && d._graph.gater) };
+  return { ba: d.fx.barber.on, ga: d.fx.gater.on, graph: Boolean(d._graph && d._graph.barber && d._graph.gater) };
 });
-check('flanger + gater engaged', fxState.fl && fxState.ga && fxState.graph);
+check('barber + gater engaged (boot defaults)', fxState.ba && fxState.ga && fxState.graph);
 
 let heard = 0;
 for (let i = 0; i < 25; i++) {
@@ -209,8 +209,13 @@ for (let i = 0; i < 25; i++) {
 }
 check('audio still passes the FX chain', heard > 0.005, `peak=${heard.toFixed(3)}`);
 
-// Gater division buttons rewire the schedule.
-await frame.locator('.deck-A .btn-div').nth(2).click();
+// Gater division buttons rewire the schedule. Scope to the unit that HOLDS
+// the gater — echo carries its own division row, blind indexes hit it.
+await frame.evaluate(() => {
+  const units = [...document.querySelectorAll('.deck-A .fx-unit')];
+  const gaterUnit = units.find((u) => (u.querySelector('.fx-sel') || {}).value === 'gater');
+  gaterUnit.querySelectorAll('.btn-div')[2].click(); // 1/16
+});
 const div = await frame.evaluate(() => window.__djclanker.decks.A.fx.gater.division);
 check('gater division switched to 1/16', div === 0.25, `division=${div}`);
 

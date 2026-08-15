@@ -268,8 +268,12 @@
         // default stays faithful to a real NIP-5D host — that is the
         // constraint the E2E suites have to keep testing against.
         if (new URLSearchParams(location.search).has('devices')) {
-          frame.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-downloads');
-          log('DEVICE MODE — sandbox relaxed to allow-same-origin; output device selection enabled');
+          // allow-popups(-to-escape-sandbox): the ⧉ 2ND visuals window. Only
+          // meaningful here — with an opaque origin the popped window would be
+          // unreachable anyway, so the plain shell stays popup-free.
+          frame.setAttribute('sandbox',
+            'allow-scripts allow-same-origin allow-downloads allow-popups allow-popups-to-escape-sandbox');
+          log('DEVICE MODE — sandbox relaxed to allow-same-origin; output devices + visuals pop-out enabled');
         }
 
         frame.srcdoc = srcdoc;
