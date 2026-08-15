@@ -1,0 +1,9 @@
+{
+  "name": "@clanker/playlist",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "Setlist with performance marks (cue + 4 hot cues per track), import/export, kind-30003 publish. Extraction target M7-2 — see docs/M7-modules.md.",
+  "main": "src/index.js"
+}

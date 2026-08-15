@@ -5,6 +5,9 @@
   "type": "module",
   "license": "MIT",
   "description": "DJ David Clanker - a two-deck auto-DJ napplet (NIP-5D): Wavlake value4value, your own Navidrome crate, Audius/Jamendo/Archive discovery",
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "dev": "vite --port 5173 --host 127.0.0.1",
     "build": "vite build",

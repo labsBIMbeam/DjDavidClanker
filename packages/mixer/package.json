@@ -1,0 +1,9 @@
+{
+  "name": "@clanker/mixer",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "Crossfader, 3-band EQ + kills, filter models (clean/djm/xone), the 16-unit FX rack, macro FX, cue bus. Extraction target M7-3 — see docs/M7-modules.md.",
+  "main": "src/index.js"
+}
