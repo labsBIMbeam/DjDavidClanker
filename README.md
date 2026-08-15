@@ -280,6 +280,31 @@ via `srcdoc` with `sandbox="allow-scripts"`, injects the official
 real `resource.bytes` fetches against Wavlake — which makes the FULL path
 actually testable locally.
 
+### Local stack for the standalone build
+
+The standalone app (`npm run preview`, or the public nsite deploy) runs
+without any host shell: charts, local files, WebLN zaps and NIP-07 publishing
+work out of the box, but Wavlake AUDIO stays in the BASIC backend — the CDN
+sends no CORS headers, so the browser cannot decode the bytes. One command
+brings up everything that lifts this:
+
+```bash
+node dev/local-stack.mjs        # ingest (with /proxy) + Navidrome via docker
+node dev/local-stack.mjs --no-docker   # ingest only
+```
+
+Then paste into ⚙ Settings of the standalone app:
+
+| Setting | Value | Unlocks |
+|---|---|---|
+| CORS proxy | `http://127.0.0.1:8321/proxy?url={url}` | Wavlake tracks decode FULL — EQ, FX, scratch, waveform |
+| Ingest URL | `http://127.0.0.1:8321` | Discovery tab + auto-promote into the library |
+| Server URL | `http://127.0.0.1:4533` | your own collection via Navidrome (Subsonic API) |
+
+The `/proxy` endpoint lives in the ingest service: a streaming CORS relay
+with SSRF guards (public targets only, every redirect hop re-checked, hard
+size cap). It exists for the one DJ on localhost, not as infrastructure.
+
 ```bash
 node dev/smoke.mjs           # end-to-end in the real sandboxed iframe (Playwright)
 node dev/fx-sync-check.mjs   # FX rack, SYNC latch, loops, DROP
