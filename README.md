@@ -81,6 +81,11 @@ network access to a host shell.
   resolves its next three picks in advance, so what the rail shows is what
   will play. **WAVLAKE PICKS** suggests chart tracks matched to the running
   deck (key/BPM scoring) — one tap into the queue, zappable by the crowd
+- **≡ QUEUE desk**: queue and playlist in ONE view — the running queue
+  stays pinned on top (with the LIST/SHUF/SMART order right in its
+  header), any source switches below it, every row offers `+` (append,
+  deduped), `1 2 3` (straight into the top slots) and `+ ALL FROM LIST`
+  appends a whole playlist without replacing what is already queued
 - 3-band EQ with kill, bipolar filter sweep (LP ↔ HP), trim with auto-gain
 - Channel fader plus VU meter per deck
 

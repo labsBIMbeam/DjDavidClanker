@@ -237,6 +237,93 @@ const q5 = await frame.evaluate(async () => {
 check('wavlake picks suggest chart tracks beside the queue', q5.cards === 3 && q5.rowBtns > 0,
   `cards=${q5.cards} row-promotes=${q5.rowBtns}`);
 
+/* ----------------------------- queue desk ----------------------------- */
+
+// One tab that is queue AND playlist: the running queue pinned on top, any
+// source list below, + / 1 2 3 on every row, the order mode in the header.
+const d1 = await frame.evaluate(async () => {
+  const dj = window.__djclanker;
+  const mk = (i) => ({ id: 'qd-' + i, title: 'QD ' + i, artist: 'Desk', duration: 200, streamUrls: [], source: 'server' });
+  dj.automix.order = 'list';
+  dj.automix.setQueue([1, 2, 3, 4].map(mk));
+  document.querySelector('.mode-queue').click();
+  // Real user flow: pick a source below the pinned queue. Re-click the
+  // Charts tab while polling — if a stray epoch bump ate a response, the
+  // next click fires a fresh fetch with the newest epoch.
+  for (let i = 0; i < 40 && document.querySelectorAll('.track-row .qslot-group').length < 2; i++) {
+    if (i % 8 === 0) document.querySelector('.tab').click();
+    dj.automix.tick(0.016);
+    dj.browser.tick();
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  const head = document.querySelector('.desk-head');
+  return {
+    head: head ? head.textContent : '',
+    deskRows: document.querySelectorAll('.queue-desk .qfull-row').length,
+    slotRows: document.querySelectorAll('.track-row .qslot-group').length,
+    tabsVisible: getComputedStyle(document.querySelector('.browser-tabs')).display !== 'none',
+    heading: (document.querySelector('.browser-h1') || {}).textContent || '',
+  };
+});
+check('queue desk pins the whole queue above the sources',
+  d1.head.includes('4 tracks') && d1.deskRows === 4 && d1.slotRows >= 2 && d1.tabsVisible,
+  `rows=${d1.deskRows} slotRows=${d1.slotRows} list="${d1.heading}"`);
+
+const d2 = await frame.evaluate(() => {
+  const dj = window.__djclanker;
+  const kick = () => { dj.automix.tick(0.016); dj.browser.tick(); };
+  const rows = [...document.querySelectorAll('.track-row .qslot-group')];
+  const before = dj.automix.queue.length;
+  rows[0].querySelector('button').click(); kick();
+  const afterAppend = dj.automix.queue.length;
+  const appendedId = dj.automix.queue[dj.automix.queue.length - 1].id;
+  rows[0].querySelector('button').click(); kick();
+  const afterDupe = dj.automix.queue.length;
+  const btn2 = [...rows[1].querySelectorAll('button')].find((b) => b.textContent === '2');
+  btn2.click(); kick();
+  return {
+    appended: afterAppend === before + 1,
+    deduped: afterDupe === afterAppend,
+    appendedAtEnd: appendedId !== 'qd-4' ? 'chart' : 'FAIL',
+    slot2: dj.automix.queue[dj.automix.cursor + 1].id !== 'qd-2',
+    deskRow2: [...document.querySelectorAll('.queue-desk .qfull-title')][1].textContent,
+  };
+});
+check('desk rows append with + (deduped) and push into slot 2',
+  d2.appended && d2.deduped && d2.slot2, `slot2 now "${d2.deskRow2}"`);
+
+const d3 = await frame.evaluate(() => {
+  const dj = window.__djclanker;
+  const kick = () => { dj.automix.tick(0.016); dj.browser.tick(); };
+  const ob = document.querySelector('.btn-qorder');
+  const start = ob.textContent;
+  ob.click(); kick();
+  const after = { label: document.querySelector('.btn-qorder').textContent, engine: dj.automix.order };
+  const f1 = dj.automix.queue.slice(dj.automix.cursor, dj.automix.cursor + 3).map((t) => t.id);
+  kick(); kick();
+  const f2 = dj.automix.queue.slice(dj.automix.cursor, dj.automix.cursor + 3).map((t) => t.id);
+  return { start, after, stable: f1.join() === f2.join() };
+});
+check('desk order button cycles LIST → SHUF with a stable materialized front',
+  d3.start === 'LIST' && d3.after.label === 'SHUF' && d3.after.engine === 'shuffle' && d3.stable,
+  `${d3.start} → ${d3.after.label}`);
+
+const d4 = await frame.evaluate(() => {
+  const dj = window.__djclanker;
+  const before = dj.automix.queue.length;
+  document.querySelector('.btn-addall-q').click();
+  dj.automix.tick(0.016); dj.browser.tick();
+  const items = dj.browser.currentItems();
+  const queuedIds = new Set(dj.automix.queue.map((t) => t.id));
+  return {
+    added: dj.automix.queue.length - before,
+    listLen: items.length,
+    allIn: items.every((t) => queuedIds.has(t.id)),
+  };
+});
+check('+ ALL FROM LIST appends only the missing tracks', d4.added > 0 && d4.added < d4.listLen && d4.allIn,
+  `${d4.added} of ${d4.listLen} added, rest were queued already`);
+
 await page.screenshot({ path: `${OUT}-crate.png`, fullPage: true });
 await browser.close();
 

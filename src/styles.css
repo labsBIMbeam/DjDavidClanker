@@ -587,6 +587,19 @@ html, body {
 .btn-qdrop:hover { color: #ff6a00; border-color: #ff6a00; }
 .suggest-card { border-style: dashed; opacity: 0.92; }
 .btn-qnext { font-weight: 700; }
+.mode-queue.on { color: #ffa733; border-color: #ffa733; }
+.queue-desk { display: none; }
+.queue-mode .queue-desk {
+  display: block; margin: 0 0 8px; padding: 6px 8px;
+  border: 1px solid #4a3213; border-radius: 8px; background: #120e08;
+}
+.desk-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.desk-head-btns { display: inline-flex; gap: 4px; }
+.btn-qorder { color: #ffa733; }
+.desk-list { max-height: 30vh; }
+.qslot-group { display: inline-flex; gap: 2px; }
+.btn-qslot { padding: 0 6px; min-width: 20px; }
+.queue-mode .btn-addpl, .queue-mode .btn-zap-mini { display: none; }
 @media (max-width: 1100px) {
   .browser-main { grid-template-columns: 220px 1fr; }
   .upnext { display: none; }
