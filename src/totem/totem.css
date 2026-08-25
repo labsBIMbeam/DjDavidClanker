@@ -1,0 +1,88 @@
+/* DJ David Clanker · Totem — one 480x320 screen at a time, nothing scrolls,
+   no control under the shell switcher's 44px. */
+
+:root {
+  --coal: #0b0b0c;
+  --panel: #131315;
+  --line: #26262a;
+  --ink: #f2efe6;
+  --dim: #9a958a;
+  --ember: #ff7a1a;
+  --ember-dim: #b35310;
+  --live: #63e889;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; user-select: none; -webkit-user-select: none; }
+html, body { width: 100%; height: 100%; margin: 0; }
+body {
+  overflow: hidden;
+  display: flex; flex-direction: column;
+  background: var(--coal); color: var(--ink);
+  font-family: ui-monospace, Consolas, monospace; font-size: 12px;
+  touch-action: manipulation;
+}
+button { font: inherit; color: inherit; cursor: pointer; touch-action: manipulation; }
+
+/* 45px: the 44px minimum survives the bar's own border. */
+.tabs { flex: 0 0 45px; display: flex; align-items: stretch; border-bottom: 1px solid var(--line); }
+.tab {
+  flex: 0 0 132px; border: 0; border-right: 1px solid var(--line);
+  background: transparent; color: var(--dim);
+  font-size: 12px; font-weight: 700; letter-spacing: .14em;
+}
+.tab.on { color: var(--ember); background: var(--panel); box-shadow: inset 0 -3px var(--ember); }
+.onair { margin-left: auto; display: flex; align-items: center; gap: 7px; padding: 0 14px; color: var(--dim); font-size: 10px; letter-spacing: .14em; }
+.onair i { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); }
+.onair.live { color: var(--live); }
+.onair.live i { background: var(--live); animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .35; } }
+
+.screen { flex: 1 1 auto; min-height: 0; }
+.screen[hidden] { display: none; }
+
+/* ---- auto mix: disc left, the rail right ---- */
+.mix { display: grid; grid-template-columns: 240px minmax(0, 1fr); }
+.disc-wrap { display: flex; align-items: center; justify-content: center; padding: 8px; }
+.disc { width: 240px; height: 240px; max-width: 100%; max-height: 100%; }
+.rail { min-width: 0; display: flex; flex-direction: column; gap: 8px; padding: 10px 10px 10px 0; }
+.now { display: grid; gap: 2px; }
+.now-title { font-size: 14px; color: #fff; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.now-artist { color: var(--dim); font-size: 11px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.status { display: grid; gap: 2px; min-height: 34px; }
+.status-label { color: var(--ember); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
+.status-detail { color: var(--dim); font-size: 10px; line-height: 1.5; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.meter { height: 5px; background: var(--panel); border: 1px solid var(--line); }
+.meter-fill { height: 100%; width: 0; background: var(--ember-dim); }
+
+/* The corner belongs to the shell switcher: the actions stop 54px short. */
+.mix-actions { margin-top: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding-right: 54px; }
+.big { min-height: 48px; min-width: 44px; border: 1px solid var(--line); background: var(--panel); font-size: 12px; font-weight: 700; letter-spacing: .08em; }
+.big.primary { background: var(--ember); border-color: var(--ember); color: #140a02; }
+.big:disabled { opacity: .4; }
+
+/* ---- playlist: three rows and a pager ---- */
+.playlist { display: flex; flex-direction: column; }
+.queue { flex: 1 1 auto; min-height: 0; overflow: hidden; display: grid; grid-auto-rows: 58px; align-content: start; }
+.row {
+  display: grid; grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center; gap: 10px; padding: 0 14px;
+  border: 0; border-bottom: 1px solid var(--line);
+  background: transparent; text-align: left;
+}
+.row.live { background: var(--panel); box-shadow: inset 3px 0 var(--live); }
+.row .n { color: var(--dim); font-size: 10px; }
+.row .copy { min-width: 0; display: grid; gap: 1px; }
+.row .copy strong { font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.row .copy span { color: var(--dim); font-size: 10px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.row .when { color: var(--ember); font-size: 9px; letter-spacing: .12em; text-transform: uppercase; }
+.empty { min-height: 120px; display: grid; place-content: center; padding: 20px 40px; text-align: center; color: var(--dim); line-height: 1.7; }
+
+.pager { flex: 0 0 44px; display: flex; align-items: center; gap: 8px; padding: 0 64px 0 14px; border-top: 1px solid var(--line); }
+.pager[hidden] { display: none; }
+.pager-step { width: 64px; height: 44px; border: 1px solid var(--line); background: transparent; color: var(--ember); font-size: 18px; }
+.pager-step:disabled { opacity: .35; }
+.pager-dots { flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; }
+.pager-dots i { width: 8px; height: 8px; border-radius: 50%; background: var(--line); }
+.pager-dots i.on { background: var(--ember); }
+.pager-dots .count { color: var(--dim); font-size: 11px; letter-spacing: .1em; }
