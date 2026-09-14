@@ -105,6 +105,38 @@
         return Promise.all(tries).then(() => results);
       }
 
+      /**
+       * Read real relays for a query when the page was opened with `?relays=1`
+       * (or the NIP-07 sign-in happened): one REQ per relay, collected until
+       * EOSE or the timeout, deduplicated by id. Without the flag the canned
+       * kind-30003 set below is all a query returns, and the Napstr tab shows
+       * its empty state — the napplet stays testable offline.
+       */
+      const LIVE_QUERIES = new URLSearchParams(location.search).has('relays');
+      function queryRelays(filters, timeoutMs = 8000) {
+        if (NO_RELAY) return Promise.resolve([]);
+        const seen = new Map();
+        const tries = RELAYS.map((url) => new Promise((resolve) => {
+          let ws;
+          const sub = 'dev' + Math.random().toString(16).slice(2, 8);
+          const done = () => { try { ws && ws.close(); } catch { /* closed */ } resolve(); };
+          const timer = setTimeout(done, timeoutMs);
+          try {
+            ws = new WebSocket(url);
+            ws.onopen = () => ws.send(JSON.stringify(['REQ', sub, ...filters]));
+            ws.onmessage = (m) => {
+              try {
+                const d = JSON.parse(m.data);
+                if (d[0] === 'EVENT' && d[1] === sub && d[2] && d[2].id && !seen.has(d[2].id)) seen.set(d[2].id, d[2]);
+                if (d[0] === 'EOSE' && d[1] === sub) { clearTimeout(timer); done(); }
+              } catch { /* not for us */ }
+            };
+            ws.onerror = () => { clearTimeout(timer); done(); };
+          } catch { clearTimeout(timer); done(); }
+        }));
+        return Promise.all(tries).then(() => [...seen.values()]);
+      }
+
       const proxy = (u) => `/proxy?url=${encodeURIComponent(u)}`;
       const storage = new Map();
 
@@ -184,8 +216,12 @@
           case 'relay.query': {
             const filters = [].concat(msg.filters || []);
             const wantsSets = filters.some((f) => (f.kinds || []).some((k) => k === 30003 || k === 30078));
-            const events = wantsSets ? [{ event: FIXTURE_SET }] : [];
-            log(type, `${events.length} event(s)`);
+            let events = wantsSets ? [{ event: FIXTURE_SET }] : [];
+            if (LIVE_QUERIES || nip07) {
+              const live = await queryRelays(filters);
+              events = live.map((event) => ({ event })).concat(wantsSets ? [{ event: FIXTURE_SET }] : []);
+            }
+            log(type, `${events.length} event(s)${LIVE_QUERIES || nip07 ? ' (live relays)' : ''}`);
             return post({ type: `${type}.result`, id, events });
           }
           case 'outbox.publish':

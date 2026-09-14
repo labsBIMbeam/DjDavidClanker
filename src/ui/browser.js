@@ -1,6 +1,8 @@
 import { h, clear, fmtTime, fmtSats } from './dom.js';
 import * as wl from '../lib/wavlake.js';
 import { loadPlaylists, resolvePlaylist } from '../lib/nostr.js';
+import { browseLive as napstrBrowse, searchLive as napstrSearch, NAPSTR_HOME } from '../lib/napstr.js';
+import { openLink } from '../lib/nap.js';
 import { store } from '../lib/nap.js';
 import { setImage } from '../lib/artwork.js';
 import { trackFromFile } from '../lib/localtracks.js';
@@ -66,6 +68,15 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckSt
     'aria-label': 'Nostr pubkey',
   });
 
+  const napstrInput = h('input', {
+    class: 'search-input',
+    type: 'text',
+    placeholder: 'Search the swarm…',
+    'aria-label': 'Search Napstr',
+    onkeydown: (e) => { if (e.key === 'Enter') runNapstrSearch(); },
+  });
+  let napstrStats = '';
+
   function openTab(key) {
     // The queue desk keeps its panel pinned while the source tabs switch the
     // list below it — that is the whole point of the desk. Every other path
@@ -80,6 +91,7 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckSt
     else if (key === 'server') showServerHome();
     else if (key === 'discover') showDiscoverHome();
     else if (key === 'local') showLocal();
+    else if (key === 'napstr') loadNapstr();
     else renderList();
   }
 
@@ -92,6 +104,7 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckSt
     ['discover', 'Discover'],
     ['local', 'Local'],
     ['nostr', 'Nostr'],
+    ['napstr', 'Napstr'],
   ].map(([key, label]) =>
     h('button', { class: 'tab', onclick: () => openTab(key) }, label),
   );
@@ -466,6 +479,45 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckSt
     }, 'Nostr');
   }
 
+  /* ------------------------------ napstr ------------------------------ */
+  // The swarm's catalogue is on the relays; the bytes are not. A row plays when a
+  // gateway serves the file by hash, otherwise it says so and points at Napstr.
+
+  const NO_RELAY = 'No relay access — this host provides neither outbox nor relay.';
+
+  async function loadNapstr() {
+    const stale = beginList();
+    await guard(async () => {
+      const { tracks, offered, seeding } = await napstrBrowse();
+      if (stale()) return;
+      napstrStats = offered ? `${offered} files offered by ${seeding} seeders right now` : '';
+      renderSide();
+      if (!tracks.length) {
+        setItems([], 'Napstr', capabilities.outbox || capabilities.relay
+          ? 'Nobody is seeding right now.' : NO_RELAY);
+      } else {
+        setItems(tracks, 'Napstr · live now', `${tracks.length} of ${offered} offered files, most seeded first`);
+      }
+    }, 'Napstr');
+  }
+
+  async function runNapstrSearch() {
+    const term = napstrInput.value.trim();
+    if (!term) { loadNapstr(); return; }
+    if (mode !== 'queue') mode = 'sources';
+    tab = 'napstr';
+    syncMode();
+    renderSide();
+    const stale = beginList();
+    await guard(async () => {
+      const { tracks } = await napstrSearch(term);
+      if (stale()) return;
+      setItems(tracks, `Napstr · “${term}”`, tracks.length
+        ? `${tracks.length} tracks, seeded ones first`
+        : 'Nothing in the catalogue for that. Try an artist or a word from the title.');
+    }, 'Napstr search');
+  }
+
   async function openPlaylist(pl) {
     const stale = beginList();
     await guard(async () => {
@@ -588,7 +640,10 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckSt
       h('div', { class: 'row-stats' },
         inSetlist ? h('span', { class: 'cue-badge', title: 'Stored performance marks' }, cueSummary(t)) : null,
         keyBpmChip(t),
-        h('span', { class: 'row-dur' }, fmtTime(t.duration)),
+        t.napstr
+          ? h('span', { class: 'row-dur row-seed', title: 'Seeders online, format and size in the Napstr swarm' },
+            `${t.napstr.seeders} seeding · ${t.napstr.format} · ${Math.round(t.napstr.size / 1048576)} MB`)
+          : h('span', { class: 'row-dur' }, fmtTime(t.duration)),
         !inSetlist && t.sats7d ? h('span', { class: 'row-sats', title: 'Sats over the last 7 days' }, `⚡${fmtSats(t.sats7d)}`) : null,
       ),
       h('div', { class: 'row-actions' },
@@ -1015,7 +1070,7 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckSt
 
   function renderSide() {
     for (let i = 0; i < tabs.length; i++) {
-      const key = ['charts', 'search', 'server', 'discover', 'local', 'nostr'][i];
+      const key = ['charts', 'search', 'server', 'discover', 'local', 'nostr', 'napstr'][i];
       tabs[i].classList.toggle('on', key === tab && mode === 'sources');
     }
     clear(sideEl);
@@ -1101,6 +1156,16 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckSt
         npubInput,
         h('button', { class: 'btn btn-primary', onclick: loadNostrPlaylists }, 'Load'),
         sideEl._nostrExtra || h('div', { class: 'muted' }, 'Sets containing Wavlake links get resolved.'),
+      ));
+    } else if (tab === 'napstr') {
+      sideEl.appendChild(h('div', { class: 'side-group' },
+        h('div', { class: 'side-h' }, 'Napstr swarm'),
+        napstrInput,
+        h('button', { class: 'btn btn-primary', onclick: runNapstrSearch }, 'Search'),
+        chip('Live now', () => loadNapstr()),
+        h('div', { class: 'muted' }, napstrStats || 'Music shared over Nostr. The catalogue is public; the files come from seeders.'),
+        h('div', { class: 'muted' }, 'A track plays here when a gateway or Blossom mirror holds it by hash. Otherwise fetch it with Napstr.'),
+        h('button', { class: 'btn btn-ghost', onclick: () => openLink(NAPSTR_HOME, 'Napstr') }, 'Get Napstr'),
       ));
     }
   }
