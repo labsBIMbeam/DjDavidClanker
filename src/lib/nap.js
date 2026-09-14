@@ -7,11 +7,14 @@
  * no WebSocket, no localStorage.
  *
  * Standalone (plain browser tab, `npm run dev`) none of that exists, so every
- * helper here degrades to a native equivalent. That keeps the app testable
- * outside a shell without forking the code paths above this module.
+ * helper here degrades to a native equivalent from ./ambient.js. That keeps
+ * the app testable outside a shell without forking the code paths above this
+ * module. The napplet artifact swaps ambient.js for its sandbox stand-in at
+ * build time (build/sandbox-purge.js).
  */
 
 import * as sdk from '@napplet/sdk';
+import { ambientFetch, ambientStorage, ambientSigner } from './ambient.js';
 
 const NS = () => (typeof window !== 'undefined' ? window.napplet : undefined);
 
@@ -23,6 +26,9 @@ export function has(domain) {
   const ns = NS();
   return Boolean(ns && ns[domain]);
 }
+
+/** NIP-07 signer for the standalone app; always absent in the napplet artifact. */
+export const browserSigner = ambientSigner;
 
 /** Snapshot of which host domains this napplet actually got. */
 export function capabilities() {
@@ -51,7 +57,7 @@ export function capabilities() {
 export async function fetchBlob(url, { signal, proxy } = {}) {
   if (has('resource')) return sdk.resource.bytes(url, signal ? { signal } : undefined);
   const target = proxy ? proxy.replace('{url}', encodeURIComponent(url)) : url;
-  const res = await fetch(target, { signal });
+  const res = await ambientFetch(target, { signal });
   if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
   return res.blob();
 }
@@ -89,7 +95,7 @@ export const store = {
       }
     }
     try {
-      return localStorage.getItem(key);
+      return ambientStorage().getItem(key);
     } catch {
       return memStore.has(key) ? memStore.get(key) : null;
     }
@@ -103,7 +109,7 @@ export const store = {
       }
     }
     try {
-      localStorage.setItem(key, value);
+      ambientStorage().setItem(key, value);
     } catch {
       memStore.set(key, value);
     }
@@ -207,8 +213,9 @@ export async function publishEvent(template) {
   }
   if (has('relay')) return sdk.relay.publish(template);
   // Standalone dev: NIP-07 browser extension, if present.
-  if (typeof window !== 'undefined' && window.nostr) {
-    const signed = await window.nostr.signEvent(template);
+  const signer = ambientSigner();
+  if (signer) {
+    const signed = await signer.signEvent(template);
     return { ok: true, event: signed, eventId: signed.id, standalone: true };
   }
   throw new Error('No publish capability (no outbox/relay domain, no NIP-07 signer)');

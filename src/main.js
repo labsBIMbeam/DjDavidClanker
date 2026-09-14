@@ -11,7 +11,9 @@ import { openModal, toast } from './ui/modal.js';
 import { openZapDialog } from './ui/zapmodal.js';
 import { h, clear, scrambleTo } from './ui/dom.js';
 import { Visualizer } from './ui/visualizer.js';
-import { capabilities, store, getPublicKey, onIdentityChanged, inShell, mediaSession } from './lib/nap.js';
+import {
+  capabilities, store, getPublicKey, onIdentityChanged, inShell, mediaSession, browserSigner,
+} from './lib/nap.js';
 import { publishSetlist } from './lib/nostr.js';
 import { hexToNpub } from './lib/bech32.js';
 import { trackFromFile } from './lib/localtracks.js';
@@ -514,7 +516,7 @@ function recordPlay(track) {
 
 async function publishCurrentSet() {
   if (!setlist.length) return toast('Nothing played yet.', 'warn');
-  if (!caps.outbox && !caps.relay && !window.nostr) {
+  if (!caps.outbox && !caps.relay && !browserSigner()) {
     return toast('No publish channel available (neither outbox/relay nor NIP-07).', 'bad', 6000);
   }
   const titleInput = h('input', { class: 'search-input', value: `DJ David Clanker Set`, 'aria-label': 'Title' });

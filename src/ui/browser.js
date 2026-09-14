@@ -4,6 +4,7 @@ import { loadPlaylists, resolvePlaylist } from '../lib/nostr.js';
 import { browseLive as napstrBrowse, searchLive as napstrSearch, NAPSTR_HOME } from '../lib/napstr.js';
 import { openLink } from '../lib/nap.js';
 import { store } from '../lib/nap.js';
+import { ambientFetch } from '../lib/ambient.js';
 import { setImage } from '../lib/artwork.js';
 import { trackFromFile } from '../lib/localtracks.js';
 import { getAnalysis, trackCacheId } from '../lib/analysiscache.js';
@@ -966,11 +967,11 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckSt
     if (t.localFile) {
       const form = new FormData();
       form.append('file', t.localFile, t.localFile.name);
-      const res = await fetch(`${settings.ingestUrl}/ingest`, { method: 'POST', body: form });
+      const res = await ambientFetch(`${settings.ingestUrl}/ingest`, { method: 'POST', body: form });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return;
     }
-    const res = await fetch(`${settings.ingestUrl}/ingest/url`, {
+    const res = await ambientFetch(`${settings.ingestUrl}/ingest/url`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ url: t.streamUrls[0], artist: t.artist, title: t.title }),

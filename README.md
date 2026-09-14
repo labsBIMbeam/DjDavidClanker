@@ -300,20 +300,34 @@ the motor takes over, pulls the rate to nominal and hands back to `source`.
 ```bash
 npm install
 npm run dev        # Vite on :5173 — standalone, BASIC mode
-npm run build      # dist/index.html (single-file) + dist/.nip5a-manifest.json
-npm run shell      # build + dev host shell on :5178  ← test it this way
+npm run build      # dist/index.html (single-file napplet) + dist/.nip5a-manifest.json
+npm run build:standalone  # dist-standalone/index.html — the standalone app, not a napplet
+npm run shell      # both builds + dev host shell on :5178  ← test it this way
+npm run conformance       # official @napplet/conformance-cli against dist/
 ```
+
+**Two artifacts, one source.** The app reaches the browser's own network,
+storage and NIP-07 signer only through `src/lib/ambient.js`. The napplet build
+(`dist/`) swaps that module for `src/lib/ambient.sandbox.js` at build time
+(`build/sandbox-purge.js`), so the published bundle contains no `fetch`,
+`localStorage` or `window.nostr` and passes the conformance scanner. The
+stand-ins behave like the NIP-5D sandbox already does (no direct network, no
+origin storage, no signer), so nothing changes inside a real host. The
+standalone build keeps the ambient fallbacks and ships no manifest. Publish
+`dist/` only.
 
 `npm run shell` starts a minimal NIP-5D shell (`dev/`) that loads the napplet
 via `srcdoc` with `sandbox="allow-scripts"`, injects the official
 `@napplet/shim` prelude and serves the `resource`, `identity`, `storage`,
 `outbox`, `relay`, `common`, `link` domains. The built-in server proxy allows
 real `resource.bytes` fetches against Wavlake — which makes the FULL path
-actually testable locally.
+actually testable locally. `?devices=1` relaxes the sandbox and loads the
+standalone artifact instead, since the direct ingest upload lives only there.
 
 ### Local stack for the standalone build
 
-The standalone app (`npm run preview`, or the public nsite deploy) runs
+The standalone app (`npm run preview` after `npm run build:standalone`, or the
+public nsite deploy built the same way) runs
 without any host shell: charts, local files, WebLN zaps and NIP-07 publishing
 work out of the box, but Wavlake AUDIO stays in the BASIC backend — the CDN
 sends no CORS headers, so the browser cannot decode the bytes. One command
@@ -364,12 +378,16 @@ napplet deploy
 
 ```
 index.html              napplet entry
-vite.config.js          nip5aManifest(), single-file artifact
+vite.config.js          nip5aManifest(), single-file artifact; napplet + standalone modes
+build/
+  sandbox-purge.js      napplet build: ambient.js -> ambient.sandbox.js
 src/
   main.js               wiring, keyboard shortcuts, settings, setlist
   styles.css
   lib/
     nap.js              NIP-5D bridge + standalone fallbacks
+    ambient.js          the only module naming fetch / localStorage / window.nostr
+    ambient.sandbox.js  its napplet-build stand-in (no authority)
     artwork.js          images via resource.bytes → blob:
     wavlake.js          catalog.wavlake.com client
     nostr.js            read kind-30003 / publish setlist
