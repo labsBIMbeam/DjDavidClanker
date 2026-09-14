@@ -527,7 +527,7 @@ check('bpm fold scoring: octave fold is perfect, 95-vs-124 is out of range',
 
 // A third fixture, harmonically and tempo-wise FAR from Alpha: 95 BPM, C# major.
 await frame.locator('input.local-input').setInputFiles({
-  name: 'KeyCis - Gamma.wav',
+  name: 'KeyC# - Gamma.wav',
   mimeType: 'audio/wav',
   buffer: makeStructuredWav({ bpm: 95, root: 1 }),
 });

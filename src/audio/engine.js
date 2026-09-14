@@ -1606,7 +1606,7 @@ export class Mixer extends Emitter {
       const all = await navigator.mediaDevices.enumerateDevices();
       return all
         .filter((d) => d.kind === 'audiooutput')
-        .map((d, i) => ({ deviceId: d.deviceId, label: d.label || `Ausgang ${i + 1}` }));
+        .map((d, i) => ({ deviceId: d.deviceId, label: d.label || `Output ${i + 1}` }));
     } catch {
       return [];
     }

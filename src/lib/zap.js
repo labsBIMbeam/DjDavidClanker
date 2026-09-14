@@ -93,10 +93,10 @@ export async function createInvoice(track, {
   const params = await lnurlParams(rec.lnurl);
   const msats = Math.round(amountSats * 1000);
   if (params.minSendable && msats < params.minSendable) {
-    throw new Error(`Minimum sind ${Math.ceil(params.minSendable / 1000)} sats`);
+    throw new Error(`Minimum is ${Math.ceil(params.minSendable / 1000)} sats`);
   }
   if (params.maxSendable && msats > params.maxSendable) {
-    throw new Error(`Maximum sind ${Math.floor(params.maxSendable / 1000)} sats`);
+    throw new Error(`Maximum is ${Math.floor(params.maxSendable / 1000)} sats`);
   }
 
   const url = new URL(params.callback);
@@ -157,5 +157,5 @@ export async function payInvoice(invoice) {
 
 /** Last resort when the artist has no lightning address: Wavlake's own boost UI. */
 export async function openWavlakeBoost(track) {
-  return openLink(track.pageUrl, `Boost ${track.artist} auf Wavlake`);
+  return openLink(track.pageUrl, `Boost ${track.artist} on Wavlake`);
 }
