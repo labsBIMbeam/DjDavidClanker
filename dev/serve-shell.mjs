@@ -82,7 +82,11 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, 'text/html; charset=utf-8', await readFile(join(here, 'shell.html')));
     }
     if (url.pathname === '/napplet.html') {
-      return send(res, 200, 'text/plain; charset=utf-8', await readFile(join(root, 'dist/index.html')));
+      // Default: the napplet artifact (dist/, sandbox-purged). Devices mode asks
+      // for the standalone artifact, which keeps the ambient fallbacks (direct
+      // ingest upload) that a relaxed, same-origin frame can actually use.
+      const dir = url.searchParams.get('build') === 'standalone' ? 'dist-standalone' : 'dist';
+      return send(res, 200, 'text/plain; charset=utf-8', await readFile(join(root, dir, 'index.html')));
     }
     if (url.pathname === '/prelude.js') {
       return send(

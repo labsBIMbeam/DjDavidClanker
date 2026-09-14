@@ -245,7 +245,10 @@
 
       (async function boot() {
         const [napplet, prelude] = await Promise.all([
-          fetch('/napplet.html').then((r) => r.text()),
+          // Devices mode loads the standalone artifact: the napplet artifact
+          // has no direct network, so the ⤴ ingest upload only exists there.
+          fetch(new URLSearchParams(location.search).has('devices')
+            ? '/napplet.html?build=standalone' : '/napplet.html').then((r) => r.text()),
           fetch('/prelude.js').then((r) => r.text()),
         ]);
 
