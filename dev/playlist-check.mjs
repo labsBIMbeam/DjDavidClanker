@@ -1,6 +1,6 @@
 /**
  * E2E for the track playlist (crate): collect all artist tracks via
- * "+ alle → Playlist", verify the playlist menu, add one more track found
+ * "+ all → playlist", verify the playlist menu, add one more track found
  * through search, and load from the playlist onto a deck.
  *
  *   node dev/serve-shell.mjs   (running)   →   node dev/playlist-check.mjs
@@ -36,7 +36,7 @@ await frame.locator('.track-row .row-title', { hasText: /Death is a Gift/i }).fi
 const artistRows = await frame.locator('.track-row').count();
 check('artist view listed', artistRows === 10, `${artistRows} rows`);
 
-// "+ alle → Playlist" puts the whole list into the crate.
+// "+ all → playlist" puts the whole list into the crate.
 await frame.locator('.btn-addall').click();
 await frame.locator('.browser-h2', { hasText: /added to playlist/ }).waitFor({ timeout: 10000 });
 check('added all listed tracks to playlist', true);
