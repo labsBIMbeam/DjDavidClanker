@@ -86,3 +86,22 @@ button { font: inherit; color: inherit; cursor: pointer; touch-action: manipulat
 .pager-dots i { width: 8px; height: 8px; border-radius: 50%; background: var(--line); }
 .pager-dots i.on { background: var(--ember); }
 .pager-dots .count { color: var(--dim); font-size: 11px; letter-spacing: .1em; }
+/* A rejected handoff remains visible across both screens until dismissed. */
+.music-notice {
+  position: fixed;
+  z-index: 10;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 12px;
+  background: #21160e;
+  color: #fff1e7;
+  border: 1px solid #ff7a1a;
+  font: 12px/1.4 system-ui, sans-serif;
+}
+.music-notice[hidden] { display: none; }
+.music-notice span { flex: 1; }
+.music-notice button { min-width: 44px; min-height: 44px; }

@@ -8,7 +8,7 @@
  * plain URL, which browsers load fine without CORS.
  */
 
-import { fetchBlob, has } from './nap.js';
+import { fetchBlob, has, inShell } from './nap.js';
 
 const cache = new Map(); // url -> Promise<string>
 const MAX = 240;
@@ -29,7 +29,7 @@ function remember(url, promise) {
 /** Resolve a remote image URL into something the sandbox will actually render. */
 export function imageUrl(url) {
   if (!url) return Promise.resolve('');
-  if (!has('resource')) return Promise.resolve(url);
+  if (!has('resource')) return Promise.resolve(inShell() ? '' : url);
   if (cache.has(url)) return cache.get(url);
   const p = fetchBlob(url)
     .then((blob) => URL.createObjectURL(blob))

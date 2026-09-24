@@ -23,7 +23,7 @@
  * `currentRate` read correctly in all three.
  */
 
-import { fetchBlob } from '../lib/nap.js';
+import { fetchBlob, inShell } from '../lib/nap.js';
 import { detectBpm, waveformPeaks, rms, analyzeStructure, detectKey, keyObject } from './analyze.js';
 import { trackCacheId, getAnalysis, putAnalysis } from '../lib/analysiscache.js';
 import { Turntable, reversedBuffer } from './scratch.js';
@@ -370,7 +370,8 @@ export class Deck extends Emitter {
       }
     }
 
-    for (const url of urls) {
+    // Direct media URLs are a standalone fallback, never a host-denial bypass.
+    for (const url of inShell() ? [] : urls) {
       try {
         await this._loadElement(url, token);
         if (token !== this._loadToken) return;

@@ -76,6 +76,8 @@ export class Automix {
     this._recentFlows = [];
     this.busy = false; // a load is in flight
     this.pending = null; // track staged on the idle deck
+    this._queued = null; // reserved queue entry, consumed when the handover starts
+    this._loadToken = 0;
     this.lastError = '';
     this._planTempo = 0;
     this._lastLivePos = 0;
@@ -95,6 +97,7 @@ export class Automix {
     this.queue = (tracks || []).filter(Boolean);
     if (!keepPosition) this.cursor = 0;
     this._look = this.cursor;
+    this._reconcileQueued();
     this.onStatus('queue');
   }
 
@@ -135,21 +138,28 @@ export class Automix {
 
   /**
    * Put a track right behind the playhead — from the queue (moves) or from
-   * any browser list (inserts). Pure array surgery, playback untouched.
+   * any browser list (inserts). An uncommitted auto preload follows the edit;
+   * a handover already in progress finishes before the promoted track plays.
    */
   promote(track) {
     if (!track || !track.id) return false;
+    this.ensureLookahead();
     const i = this.queue.findIndex((t, k) => k >= this.cursor && t && t.id === track.id);
-    if (i === this.cursor) return true;
+    if (i === this.cursor) {
+      this._reconcileQueued();
+      return true;
+    }
     if (i > this.cursor) {
       const [t] = this.queue.splice(i, 1);
       this.queue.splice(this.cursor, 0, t);
       if (this._look <= i) this._look = Math.max(this._look, this.cursor + 1);
+      this._reconcileQueued();
       return true;
     }
     this.queue.splice(this.cursor, 0, track);
     if (this._look > this.cursor) this._look++;
     else this._look = this.cursor + 1;
+    this._reconcileQueued();
     return true;
   }
 
@@ -168,9 +178,13 @@ export class Automix {
    */
   insertAt(track, slot) {
     if (!track || !track.id) return false;
+    this.ensureLookahead();
     const at = Math.min(this.cursor + Math.max(0, (slot || 1) - 1), this.queue.length);
     const i = this.queue.findIndex((t, k) => k >= this.cursor && t && t.id === track.id);
-    if (i === at) return true;
+    if (i === at) {
+      this._reconcileQueued();
+      return true;
+    }
     if (i >= 0) {
       const [x] = this.queue.splice(i, 1);
       if (i < this._look) this._look -= 1;
@@ -178,11 +192,13 @@ export class Automix {
       this.queue.splice(dest, 0, x);
       if (dest < this._look) this._look += 1;
       else this._look = Math.max(this._look, dest + 1);
+      this._reconcileQueued();
       return true;
     }
     this.queue.splice(at, 0, track);
     if (at < this._look) this._look += 1;
     else this._look = Math.max(this._look, at + 1);
+    this._reconcileQueued();
     return true;
   }
 
@@ -192,6 +208,7 @@ export class Automix {
     if (i < 0) return false;
     this.queue.splice(i, 1);
     if (i < this._look) this._look--;
+    this._reconcileQueued();
     return true;
   }
 
@@ -208,7 +225,7 @@ export class Automix {
     this.order = v ? 'shuffle' : 'list';
   }
 
-  _takeNext() {
+  _takeNext({ reserve = false } = {}) {
     if (this.cursor >= this.queue.length) {
       const more = this.refill() || [];
       if (more.length) {
@@ -219,6 +236,12 @@ export class Automix {
       } else {
         return null;
       }
+    }
+    // A preload is still upcoming: keep it visible/editable until the first
+    // audible or scheduled handover action commits to it.
+    if (reserve) {
+      this.ensureLookahead(1);
+      return this.queue[this.cursor] || null;
     }
     // A materialized front (shuffle/smart lookahead) IS the decision — the
     // rail promised it, so consume it in order.
@@ -340,7 +363,7 @@ export class Automix {
     if (!this.enabled || this.fade || this.transition) return false;
     const live = this.liveDeck;
     const idle = this.idleDeck;
-    if (!live || !idle || idle.status !== 'ready') return false;
+    if (!live || !idle || idle.status !== 'ready' || this.staleId === idle.id) return false;
     this.plan = null; // a forced skip is a quick fade, not a planned blend
     this._beginFade(live, idle, Math.min(this.fadeSeconds, 6));
     return true;
@@ -367,29 +390,75 @@ export class Automix {
 
   /* ------------------------------ engine ------------------------------ */
 
-  async _loadInto(deck, track) {
+  /** Consume only our reserved entry; manual cues never consume the queue. */
+  _commitQueued() {
+    if (!this._queued) return;
+    if (this.idleDeck?.track !== this._queued) {
+      this._queued = null;
+      return;
+    }
+    const i = this.queue.indexOf(this._queued, this.cursor);
+    if (i === this.cursor) this.cursor++;
+    else if (i >= 0) {
+      this.queue.splice(i, 1);
+      if (i < this._look) this._look--;
+    }
+    this._queued = null;
+  }
+
+  /** Replace only an uncommitted preload owned by Automix on the idle deck. */
+  _reconcileQueued() {
+    if (!this._queued || this.fade || this.transition) return;
+    const idle = this.idleDeck;
+    if (!idle || idle.playing || idle.track !== this._queued) {
+      this._queued = null; // a human has taken ownership of the idle deck
+      return;
+    }
+    const next = this.queue[this.cursor];
+    if (next === this._queued) return;
+    this.plan = null;
+    if (next) this._loadInto(idle, next, { queued: true });
+    else {
+      ++this._loadToken;
+      this.busy = false;
+      this.pending = null;
+      this._queued = null;
+      this.staleId = idle.id;
+    }
+  }
+
+  async _loadInto(deck, track, { queued = false } = {}) {
+    const token = ++this._loadToken;
     this.busy = true;
     this.pending = track;
+    this._queued = queued ? track : null;
     if (this.staleId === deck.id) this.staleId = null; // it's being refilled
     this.onStatus('loading');
     try {
       await deck.load(track);
+      if (token !== this._loadToken) return;
       if (deck.status !== 'ready') {
         this.lastError = deck.error || 'track failed to load';
+        this._commitQueued();
         this.pending = null;
         // A dead track must not stall the mix — move on to the next one.
         this.onStatus('skip-error');
       }
     } catch (e) {
+      if (token !== this._loadToken) return;
       this.lastError = e.message || String(e);
+      this._commitQueued();
       this.pending = null;
     } finally {
-      this.busy = false;
-      this.onStatus('loaded');
+      if (token === this._loadToken) {
+        this.busy = false;
+        this.onStatus('loaded');
+      }
     }
   }
 
   _beginFade(live, idle, dur) {
+    this._commitQueued();
     if (this.syncTempo && idle.bpm && live.effectiveBpm) idle.syncTo(live);
     // instant: a programmed entrance must not carry the vinyl spin-up ramp.
     if (!idle.playing) idle.play({ instant: true });
@@ -427,6 +496,7 @@ export class Automix {
     // The rail reads the queue even while automix is off — keep the
     // shuffle/smart front resolved regardless of `enabled`.
     this.ensureLookahead();
+    this._reconcileQueued();
     if (!this.enabled || this.busy) return;
     const decks = this.mixer.decks;
 
@@ -476,7 +546,7 @@ export class Automix {
 
     // The live deck ran out (or someone stopped it) — hand over immediately.
     if (!live.playing && live.position >= live.duration - 0.25) {
-      if (idle.status === 'ready') {
+      if (idle.status === 'ready' && this.staleId !== idle.id) {
         this._beginFade(live, idle, 1.5);
       } else {
         this.liveId = null;
@@ -504,8 +574,10 @@ export class Automix {
       ? Math.min(left, Math.max(0, live.structure.mixOutSec - live.position) / rate)
       : left;
     if (!this.busy && stageLeft < this.preloadLead && (stale || !idle.track || idle.status !== 'ready')) {
-      const track = this._takeNext();
-      if (track && (stale || !idle.track || idle.track.id !== track.id)) this._loadInto(idle, track);
+      const track = this._takeNext({ reserve: true });
+      if (track && (stale || !idle.track || idle.track.id !== track.id)) {
+        this._loadInto(idle, track, { queued: true });
+      }
       return;
     }
 
@@ -538,6 +610,7 @@ export class Automix {
       // comfortable lead and the drift re-check has something to work with.
       const barTrack = 4 * (60 / (live.bpm || 120));
       if (live.position >= this.plan.startSec - 2 * barTrack) {
+        this._commitQueued();
         this.transition = new Transition(this.mixer, live, idle, this.plan, {
           onCrossfade: this.onCrossfade,
           onDone: (telemetry) => {

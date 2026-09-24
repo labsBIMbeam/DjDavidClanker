@@ -1,5 +1,9 @@
 # M7 — The module family
 
+> September 2026 correction: this is a library extraction plan, not a napplet
+> role registry. Read the [music boundary and conformance audit](napplet/README.md)
+> before extending it. The package entrypoints below are still placeholders.
+
 Decks, mixer, playlist and queue become reusable packages under
 `packages/*`, and where an element carries its own weight it also ships as
 its own napplet. This document is the binding cut plan; M7-1 (this PR) adds
@@ -10,11 +14,10 @@ behavior at any step — the 238-check board is the net.
 
 - Booth request: build napplets out of the individual elements (decks,
   mixer, playlist, queue).
-- NIP-5D napplets cannot embed each other (sandboxed iframes do not
-  compose), so "elements as napplets" means BOTH: packages that we and
-  third parties build napplets FROM, and standalone mini-napplets where an
-  element works solo. The DJ app itself stays the composition of all four
-  packages — same behavior, same single-file build.
+- The shell composes napplets via NAP-INTENT and NAP-INC; a napplet does not
+  embed or reach into a sibling. Libraries can be reused inside each artifact.
+  An internal deck, mixer or queue is not automatically a separate user role.
+  Standalone tools need a distinct task boundary and a tested convention.
 
 ## The four packages
 
@@ -64,6 +67,10 @@ These are the reasons M7 is three rounds and not one afternoon:
    build-order problem, moves with the deck untouched.
 6. **UI factories import `dom.js` helpers.** `h`/`clear`/`fader` become a
    tiny `@clanker/dom` internal package (not published, just shared).
+7. **Audio code also owns host I/O.** `engine.js` and `preanalyze.js` import
+   byte fetching; `analysiscache.js` imports host storage. Inject these at the
+   app boundary before calling the extracted packages reusable. Moving files
+   alone does not remove these dependencies.
 
 ## Order of execution
 

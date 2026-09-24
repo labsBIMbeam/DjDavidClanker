@@ -25,13 +25,15 @@ and `requires` tags).
 ## 2. The three constraints that drive the design
 
 If you read the code and wonder "why so roundabout" — here is the answer.
-These are not style choices, they are requirements of the spec.
+The current [conformance audit](docs/napplet/README.md) takes precedence over
+historical completion claims below. NIP-5D and individual NAP drafts own their
+respective contracts; a conservative CSP is host policy, not an iframe feature.
 
 ### 2.1 No network inside the napplet
 
-The sandbox runs with `connect-src 'none'`. There is **no `fetch`, no
-WebSocket, no `localStorage`**. Every byte arrives via `resource.bytes` — the
-host fetches it.
+The conservative host CSP uses `connect-src 'none'`. Opaque origins block
+local storage, while CSP blocks direct network calls. The sandbox alone does
+not remove `fetch`. Hosted byte loading goes through `resource.bytes`.
 
 Here that's a stroke of luck rather than a brake: Wavlake's audio CDN
 (`d12wklypp119aj.cloudfront.net`) sends **no CORS headers**. A direct browser
@@ -49,11 +51,12 @@ therefore also goes through `resource.bytes` and is handed to the DOM as a
 → `src/lib/artwork.js`. This was a genuine find in the first E2E run: the
 images stayed blank until everything went through the host.
 
-### 2.3 No signing API, no payment domain
+### 2.3 No direct signing API; legacy payment paths
 
-A napplet can only **publish** events (the host signs in the process), not
-merely sign them. Wallet access doesn't exist at all. A real NIP-57 zap needs
-exactly the opposite, though: a signed, *not* published kind-9734.
+The relay/outbox API publishes events rather than signing alone. NAP-VALUE
+exists as a separate draft for host-mediated payments and is not implemented
+here. The following paths describe this build's legacy behavior, not a claim
+that the Napplet ecosystem has no payment proposal.
 
 Hence two modes, switchable in ⚙ Settings:
 

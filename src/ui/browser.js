@@ -1,7 +1,7 @@
 import { h, clear, fmtTime, fmtSats } from './dom.js';
 import * as wl from '../lib/wavlake.js';
 import { loadPlaylists, resolvePlaylist } from '../lib/nostr.js';
-import { store } from '../lib/nap.js';
+import { store, inShell } from '../lib/nap.js';
 import { setImage } from '../lib/artwork.js';
 import { trackFromFile } from '../lib/localtracks.js';
 import { getAnalysis, trackCacheId } from '../lib/analysiscache.js';
@@ -45,6 +45,7 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckSt
   let error = '';
   let crate = [];
   let genreList = [];
+  let genreState = 'idle';
 
   const list = h('div', { class: 'track-list' });
   const headEl = h('div', { class: 'browser-heading' });
@@ -904,10 +905,11 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckSt
    * tracks (Audius / Jamendo / Archive finds) go as POST /ingest/url with
    * artist/title riding along for the tag fallback. Either way the ingest
    * pipeline (loudness → tags → library) makes the track permanent on the
-   * media server. Direct fetch — the service answers CORS; a strict napplet
-   * host without an egress bridge simply hides the button.
+   * media server. This standalone service is not a host upload capability;
+   * hosted players leave library ingest to a separate producer.
    */
   async function promoteTrack(t) {
+    if (inShell()) throw new Error('Library ingest is only available standalone');
     if (t.localFile) {
       const form = new FormData();
       form.append('file', t.localFile, t.localFile.name);
@@ -924,7 +926,7 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckSt
     if (!res.ok || json.ok === false) throw new Error(json.error || `HTTP ${res.status}`);
   }
 
-  const canPromote = (t) => Boolean(settings.ingestUrl)
+  const canPromote = (t) => !inShell() && Boolean(settings.ingestUrl)
     && (t.localFile || (t.streamUrls && t.streamUrls.length && t.source && t.source !== 'subsonic'));
 
   function ingestButton(t) {
@@ -951,7 +953,7 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckSt
 
   /** Discovery → crate: loading an Archive find onto a deck promotes it. */
   function maybeAutoPromote(t) {
-    if (autoPromoteArchive && t.source === 'archive' && settings.ingestUrl) {
+    if (autoPromoteArchive && t.source === 'archive' && canPromote(t)) {
       promoteTrack(t).catch(() => { /* discovery must keep playing regardless */ });
     }
   }
@@ -1032,9 +1034,21 @@ export function Browser({ onLoadDeck, onZap, capabilities, settings = {}, deckSt
         chip('Random', () => loadRandom(null)),
       ));
       const g = h('div', { class: 'side-group' }, h('div', { class: 'side-h' }, 'Genres'));
-      if (!genreList.length) {
-        wl.genres().then((rows) => { genreList = rows; renderSide(); }).catch(() => {});
+      if (genreState === 'idle') {
+        genreState = 'loading';
+        wl.genres().then((rows) => {
+          genreList = rows;
+          genreState = 'loaded';
+          renderSide();
+        }).catch(() => { genreState = 'error'; renderSide(); });
+      }
+      if (genreState === 'loading') {
         g.appendChild(h('div', { class: 'muted' }, 'loading…'));
+      } else if (genreState === 'error') {
+        g.appendChild(h('div', { class: 'muted' }, 'Genres unavailable'));
+        g.appendChild(chip('Retry', () => { genreState = 'idle'; renderSide(); }));
+      } else if (!genreList.length) {
+        g.appendChild(h('div', { class: 'muted' }, 'No genres'));
       } else {
         for (const gen of genreList.slice(0, 24)) g.appendChild(chip(`${gen.name}`, () => loadRandom(gen)));
       }

@@ -12,6 +12,7 @@ import { openZapDialog } from './ui/zapmodal.js';
 import { h, clear, scrambleTo } from './ui/dom.js';
 import { Visualizer } from './ui/visualizer.js';
 import { capabilities, store, getPublicKey, onIdentityChanged, inShell, mediaSession } from './lib/nap.js';
+import { installMusicReceiver } from './lib/music.js';
 import { publishSetlist } from './lib/nostr.js';
 import { hexToNpub } from './lib/bech32.js';
 import { trackFromFile } from './lib/localtracks.js';
@@ -345,6 +346,14 @@ const automix = new Automix(mixer, {
   },
 });
 
+const musicReceiver = installMusicReceiver(automix, {
+  onAccepted: (count) => toast(count ? `${count} music track(s) added to the queue.` : 'Music ready.'),
+  onError: (error) => toast(`Music request rejected: ${error.message}`, 'warn'),
+});
+window.addEventListener('pagehide', (event) => {
+  if (!event.persisted) musicReceiver?.close();
+});
+
 // The performer rides on top of the automix: bar-synced scratches, loop
 // rolls, FX bursts and blends, every one with an undo — and it lets go of
 // anything a human touches.
@@ -643,7 +652,7 @@ function showSettings() {
     body: h('div', { class: 'settings' },
       h('label', { class: 'lbl' }, 'Default zap (sats)'), zapAmount,
       h('label', { class: 'lbl' }, 'Zap mode'), zapMode,
-      h('div', { class: 'muted' }, 'NIP-5D has no payment domain and no pure signing API. A real NIP-57 zap only works by letting the host sign the 9734 request while publishing it — so it also lands on your relays.'),
+      h('div', { class: 'muted' }, 'NIP-57 mode publishes the signed zap request to your relays. LNURL-pay creates an invoice without a Nostr receipt.'),
       h('label', { class: 'lbl' }, 'Audio outputs'),
       h('button', { class: 'btn btn-ghost', onclick: () => showOutputMenu() }, '🔈 Open audio outputs'),
       h('label', { class: 'lbl' }, 'CORS proxy (standalone only)'), proxy,

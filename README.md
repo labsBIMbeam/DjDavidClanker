@@ -5,6 +5,14 @@ A two-deck DJ mixer for [Wavlake](https://wavlake.com) music, built as a
 a sandboxed single-purpose app that delegates signing, storage, relays and
 network access to a host shell.
 
+**September 2026 conformance work:** the `music` role and
+[`napplet:music/open`](docs/napplet/conventions/music-open.md) are a **local
+proposal with a reference implementation**, not an approved registry entry.
+Desktop and Totem accept portable selections through the host and append them
+without starting or interrupting playback. Read the
+[audit, role boundary, synth direction and remaining gaps](docs/napplet/README.md)
+before extending the app or publishing a new manifest.
+
 ```
 ┌────────── Host shell (NIP-5D) ──────────────────────────────┐
 │  iframe srcdoc, sandbox="allow-scripts", connect-src 'none' │
@@ -229,11 +237,11 @@ riser before anyone opens the rack.
 
 ## What NIP-5D forces here
 
-These three constraints shape the entire architecture — they are not design
-decisions, they are requirements of the spec:
+The NIP-5D boundary and conservative host policy shape this architecture:
 
-1. **No network inside the napplet.** The sandboxed iframe runs with
-   `connect-src 'none'`; `fetch`, WebSocket and `localStorage` don't exist.
+1. **Host-mediated network access.** The opaque origin blocks local storage;
+   a conservative host CSP uses `connect-src 'none'` to block direct network
+   requests. The sandbox alone does not disable `fetch`.
    Everything goes through `resource.bytes` — the host fetches the bytes.
    Here that's a stroke of luck: Wavlake's audio CDN sends *no* CORS headers,
    a direct browser fetch of the MP3 would be impossible. The host has no
@@ -245,18 +253,18 @@ decisions, they are requirements of the spec:
    handed to the DOM as a blob URL (with an LRU cache).
    → `src/lib/artwork.js`
 
-3. **No signing API, no payment domain.** A napplet can only *publish*
-   events (the host signs in the process), not merely sign them. And there
-   is no wallet access whatsoever. A real NIP-57 zap needs exactly that: a
-   signed, *not* published kind-9734 request. Hence two modes:
+3. **No direct signing API.** The app's relay/outbox bridge publishes events;
+   it cannot request only a signature. NAP-VALUE is a separate draft for
+   host-mediated payments, not implemented here. This build retains two
+   legacy invoice paths:
 
    | Mode | What happens | Nostr receipt |
    |---|---|---|
    | `lnurl` (default) | LNURL-pay to the Lightning address from the artist profile, boost text as the LNURL comment | no |
    | `nip57` | the 9734 is signed via `outbox.publish` — and thereby also lands on your relays | yes (kind 9735) |
 
-   The invoice then goes to WebLN or, via `link.open`, as a `lightning:` URI
-   to the external wallet.
+   Hosted invoices go through `link.open` as a `lightning:` URI to the
+   external wallet; WebLN is a standalone-only fallback.
    → `src/lib/zap.js`
 
 ## Audio backends

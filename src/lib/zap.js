@@ -1,8 +1,8 @@
 /**
  * Value4Value payouts per track.
  *
- * Constraint worth stating plainly: NIP-5D exposes **no payment domain and no
- * sign-only API**. A napplet cannot open a wallet, and cannot produce a signed
+ * Legacy payment paths: this build does not implement the separate NAP-VALUE
+ * draft. Relay/outbox have no sign-only API and cannot produce a signed
  * kind-9734 zap request without also publishing it. So this module offers two
  * routes and lets the user pick:
  *
@@ -19,7 +19,7 @@
  * copy / QR.
  */
 
-import { fetchJson, getProfile, publishEvent, openLink, has } from './nap.js';
+import { fetchJson, getProfile, publishEvent, openLink, has, inShell } from './nap.js';
 import { npubToHex } from './bech32.js';
 import { bech32Decode } from './bech32.js';
 import { resolveNpub } from './wavlake.js';
@@ -142,7 +142,7 @@ export async function createInvoice(track, {
  * @returns {Promise<{method:string, ok:boolean, preimage?:string}>}
  */
 export async function payInvoice(invoice) {
-  if (typeof window !== 'undefined' && window.webln) {
+  if (!inShell() && typeof window !== 'undefined' && window.webln) {
     try {
       await window.webln.enable();
       const r = await window.webln.sendPayment(invoice);

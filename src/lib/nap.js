@@ -3,8 +3,8 @@
  *
  * Inside a napplet shell, `window.napplet` is injected before any napplet
  * script runs and is the ONLY way out of the sandbox: the iframe is
- * `sandbox="allow-scripts"` with `connect-src 'none'`, so there is no fetch(),
- * no WebSocket, no localStorage.
+ * `sandbox="allow-scripts"`; the host's conservative CSP blocks direct network
+ * access with `connect-src 'none'`. The opaque origin prevents localStorage.
  *
  * Standalone (plain browser tab, `npm run dev`) none of that exists, so every
  * helper here degrades to a native equivalent. That keeps the app testable
@@ -26,7 +26,8 @@ export function has(domain) {
 
 /** Snapshot of which host domains this napplet actually got. */
 export function capabilities() {
-  const wanted = ['resource', 'identity', 'storage', 'outbox', 'relay', 'common', 'link', 'media'];
+  const wanted = ['resource', 'inc', 'intent', 'identity', 'storage', 'outbox', 'relay',
+    'common', 'link', 'media'];
   const out = {};
   for (const d of wanted) out[d] = has(d);
   out.shell = inShell();
@@ -50,6 +51,7 @@ export function capabilities() {
  */
 export async function fetchBlob(url, { signal, proxy } = {}) {
   if (has('resource')) return sdk.resource.bytes(url, signal ? { signal } : undefined);
+  if (inShell()) throw new Error('Host resource capability unavailable');
   const target = proxy ? proxy.replace('{url}', encodeURIComponent(url)) : url;
   const res = await fetch(target, { signal });
   if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
@@ -88,6 +90,7 @@ export const store = {
         return null;
       }
     }
+    if (inShell()) return memStore.get(key) ?? null;
     try {
       return localStorage.getItem(key);
     } catch {
@@ -101,6 +104,10 @@ export const store = {
       } catch {
         return;
       }
+    }
+    if (inShell()) {
+      memStore.set(key, value);
+      return;
     }
     try {
       localStorage.setItem(key, value);
@@ -207,7 +214,7 @@ export async function publishEvent(template) {
   }
   if (has('relay')) return sdk.relay.publish(template);
   // Standalone dev: NIP-07 browser extension, if present.
-  if (typeof window !== 'undefined' && window.nostr) {
+  if (!inShell() && typeof window !== 'undefined' && window.nostr) {
     const signed = await window.nostr.signEvent(template);
     return { ok: true, event: signed, eventId: signed.id, standalone: true };
   }
@@ -223,11 +230,12 @@ export async function openLink(url, label) {
   if (has('link')) {
     try {
       const res = await sdk.link.open(url, label ? { label } : undefined);
-      return !res || res.status !== 'denied';
+      return res?.status === 'opened';
     } catch {
       return false;
     }
   }
+  if (inShell()) return false;
   try {
     window.open(url, '_blank', 'noopener,noreferrer');
     return true;

@@ -20,6 +20,7 @@ import { MatrixRain } from '../ui/rain.js';
 import { fetchObjectUrl } from '../lib/nap.js';
 import { topTracks } from '../lib/wavlake.js';
 import { initCache } from '../lib/analysiscache.js';
+import { installMusicReceiver } from '../lib/music.js';
 
 initCache().catch(() => {});
 
@@ -78,19 +79,23 @@ const mixScreen = h('section', { class: 'screen mix' },
 async function startStop() {
   mixer.resumeAudio();
   if (automix.enabled) {
-    automix.toggle();
+    automix.stop();
+    for (const deck of Object.values(mixer.decks)) deck.pause();
     paint();
     return;
   }
   btnStart.disabled = true;
   try {
-    if (automix.queue.length === 0) await loadCharts();
-    if (automix.queue.length === 0) {
+    const live = automix.liveDeck;
+    const canResume = live && live.status === 'ready';
+    if (!canResume && automix.queue.length === 0) await loadCharts();
+    if (!canResume && automix.queue.length === 0) {
       scrambleTo(statusLine, 'no signal');
       statusDetail.textContent = 'the charts did not answer — try again';
       return;
     }
-    automix.toggle();
+    if (canResume) live.play({ instant: true });
+    automix.start();
   } finally {
     btnStart.disabled = false;
     paint();
@@ -178,17 +183,20 @@ let coverFor = '';
 let angle = 0;
 
 async function ensureCover(track) {
-  const url = track && (track.artworkUrl || track.avatarUrl);
-  if (!url || coverFor === url) return;
+  const url = track && (track.artworkUrl || track.avatarUrl) || '';
+  if (coverFor === url) return;
   coverFor = url;
   coverImg = null;
+  if (!url) return;
+  let objectUrl;
   try {
-    const objectUrl = await fetchObjectUrl(url);
+    objectUrl = await fetchObjectUrl(url);
     const img = new Image();
-    img.src = objectUrl;
+    img.src = objectUrl.url;
     await img.decode();
     if (coverFor === url) coverImg = img;
   } catch { /* the bare disc plays on */ }
+  finally { if (objectUrl) objectUrl.revoke(); }
 }
 
 function drawDisc(dt, playing) {
@@ -285,8 +293,23 @@ automix.onStatus = (s) => {
   if (s === 'queue' || s === 'advance') renderQueue();
 };
 
-document.body.append(tabs, mixScreen, playlistScreen);
+const musicMessage = h('span');
+const musicNotice = h('div', { class: 'music-notice', role: 'status', hidden: true },
+  musicMessage,
+  h('button', { 'aria-label': 'Dismiss music message', onclick: () => { musicNotice.hidden = true; } }, '×'),
+);
+document.body.append(tabs, mixScreen, playlistScreen, musicNotice);
 screens.mix = mixScreen;
 screens.playlist = playlistScreen;
+const musicReceiver = installMusicReceiver(automix, {
+  onAccepted: () => { musicNotice.hidden = true; show('playlist'); },
+  onError: (error) => {
+    musicMessage.textContent = `Music request rejected: ${error.message}`;
+    musicNotice.hidden = false;
+  },
+});
+window.addEventListener('pagehide', (event) => {
+  if (!event.persisted) musicReceiver?.close();
+});
 paint();
 requestAnimationFrame(frame);

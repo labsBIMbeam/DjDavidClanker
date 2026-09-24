@@ -1,6 +1,11 @@
 import { resolve } from 'node:path';
 import { defineConfig } from 'vite';
 import { nip5aManifest } from '@napplet/vite-plugin';
+import { manifestMetadata, MUSIC_ARCHETYPES } from './build/napplet.js';
+
+const TITLE = 'DJ David Clanker · Totem';
+const DESCRIPTION = 'Music playback and auto-mix on a 480x320 panel. '
+  + 'Accepts portable music selections through the proposed music/open convention.';
 
 // The Totem build: the same engine, a 480x320 face. One self-contained file,
 // exactly like the main build, landing in dist-totem/ so the two artifacts
@@ -20,16 +25,16 @@ export default defineConfig({
   plugins: [
     nip5aManifest({
       nappletType: 'dj-david-clanker-totem',
-      title: 'DJ David Clanker · Totem',
-      description:
-        'The house DJ on a 480x320 panel: auto-mix and playlist, one screen each. '
-        + 'Wavlake charts feed the queue; the full two-deck mixer lives in the desktop build.',
+      title: TITLE,
+      description: DESCRIPTION,
+      archetypes: MUSIC_ARCHETYPES,
       artifactMode: 'single-file',
       requires: {
         infer: false,
-        explicit: ['resource', 'common'],
+        explicit: ['resource', 'inc'],
         mode: 'warn',
       },
     }),
+    manifestMetadata({ title: TITLE, description: DESCRIPTION }),
   ],
 });

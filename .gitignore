@@ -1,5 +1,11 @@
 node_modules/
 dist/
+dist-totem/
+dist-synth/
+.qa/
+*.db
+*.sqlite
+.env
 .napplet/
 *.log
 dev/.proxy-cache/
