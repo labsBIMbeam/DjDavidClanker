@@ -319,7 +319,8 @@ standalone build keeps the ambient fallbacks and ships no manifest. Publish
 `npm run shell` starts a minimal NIP-5D shell (`dev/`) that loads the napplet
 via `srcdoc` with `sandbox="allow-scripts"`, injects the official
 `@napplet/shim` prelude and serves the `resource`, `identity`, `storage`,
-`outbox`, `relay`, `common`, `link` domains. The built-in server proxy allows
+`outbox`, `relay`, `common`, `link` domains; it advertises `media` too but
+does not answer it, like many real hosts. The built-in server proxy allows
 real `resource.bytes` fetches against Wavlake — which makes the FULL path
 actually testable locally. `?devices=1` relaxes the sandbox and loads the
 standalone artifact instead, since the direct ingest upload lives only there.
@@ -368,8 +369,11 @@ screenshots to `/tmp/clanker-*.png`.
 with `d` tag, `path` hash, aggregate hash and the `requires` tags. The same
 values are stamped into `dist/index.html` as `<meta name="napplet-type">` and
 `<meta name="napplet-requires">` (`common,identity,link,media,outbox,relay,resource,storage`),
-so a host can read them from the artifact alone. The napplet uses only standard
-NAP domains, no custom host channels. To publish (Blossom upload + relay publish):
+so a host can read them from the artifact alone. The list names every domain
+the code asks the shell for, optional ones included, because a shell grants a
+napplet only the domains it declares: `media` is declared, and the app still
+runs when a shell refuses it. The napplet uses only standard NAP domains, no
+custom host channels. To publish (Blossom upload + relay publish):
 
 ```bash
 napplet init --name dj-david-clanker --relay wss://… --server https://…

@@ -513,13 +513,18 @@ devices-mode shell or standalone in a real browser; the E2E drives the map
 through the exposed `midi.handle()` with raw messages instead of hardware.
 
 **Publishing as a napplet** — audited, ready with known degradations. The
-artifact is a 172 KB single file whose sha256 matches the manifest's `path`
+artifact is a ~350 KB single file whose sha256 matches the manifest's `path`
 and aggregate tags (rebuild regenerates both). Manifest `requires` tags are
 CAPABILITY domains (resource/storage/…), not HTTP hosts — which hosts
 `resource.bytes` may fetch is the shell's policy, so Wavlake/Audius/Archive
 /Navidrome need no manifest entries; a host may still prompt or refuse per
-domain. `media` is deliberately not declared: the app degrades cleanly
-without it and `requires` means required. To publish: host `dist/index.html`
+domain. `requires` does not mean "required": a shell grants a napplet only
+the domains it declares, so the list names every domain the code asks the
+shell for, optional ones included, and the app degrades when a shell refuses
+one. That is why `media` is declared although the app runs without it (no OS
+transport controls, nothing else changes). The same eight domains are stamped
+into `dist/index.html` as `<meta name="napplet-requires">`; the napplet uses
+no Nappelin host channel and no custom shell object. To publish: host `dist/index.html`
 on a Blossom server and sign+publish the kind 35129 event the plugin emits
 (no CLI ships with @napplet — any Nostr signer works; the hashes are already
 in the manifest). Degradations in a strict host, all visible not silent:
