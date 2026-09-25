@@ -18,8 +18,10 @@ import { sandboxPurge } from './build/sandbox-purge.js';
 const NAPPLET_TYPE = 'dj-david-clanker';
 
 /**
- * Host domains the code calls through src/lib/nap.js. `media` is optional
- * (OS transport controls), but the code does use it when the shell offers it.
+ * Every host domain the code asks the shell for through src/lib/nap.js,
+ * optional ones included: a shell grants only the domains a napplet declares.
+ * `media` (OS transport controls) is optional at runtime; the app degrades
+ * without it.
  */
 const REQUIRES = ['common', 'identity', 'link', 'media', 'outbox', 'relay', 'resource', 'storage'];
 
@@ -27,15 +29,24 @@ const REQUIRES = ['common', 'identity', 'link', 'media', 'outbox', 'relay', 'res
  * The manifest plugin keeps protocol metadata out of index.html, but hosts
  * that read the artifact alone (the Nappelin Hangar check) look for these two
  * tags, so the napplet build stamps them from the same values as the manifest.
+ *
+ * `injectTo: 'head'` keeps <meta charset> first (the tags land after <title>).
+ * The hook must run `pre`: Vite injects the entry script into <head> before
+ * the normal hooks, and the single-file build later inlines ~310 KB of bundle
+ * into that tag, which would push the metas far past the first 1024 bytes a
+ * host scans.
  */
-const meta = (name, content) => ({ tag: 'meta', attrs: { name, content }, injectTo: 'head-prepend' });
+const meta = (name, content) => ({ tag: 'meta', attrs: { name, content }, injectTo: 'head' });
 const nappletMeta = () => ({
   name: 'clanker-napplet-meta',
   apply: 'build',
-  transformIndexHtml: () => [
-    meta('napplet-type', NAPPLET_TYPE),
-    meta('napplet-requires', REQUIRES.join(',')),
-  ],
+  transformIndexHtml: {
+    order: 'pre',
+    handler: () => [
+      meta('napplet-type', NAPPLET_TYPE),
+      meta('napplet-requires', REQUIRES.join(',')),
+    ],
+  },
 });
 
 /** The standalone artifact is not a napplet: drop the manifest sidecar the plugin writes. */
