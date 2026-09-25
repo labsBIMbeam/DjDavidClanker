@@ -179,7 +179,9 @@
           }
           case 'resource.bytesMany': {
             const items = [];
-            for (const u of msg.urls || []) {
+            // shim 0.30 sends `requests: [{ url, servers? }]`; older shims sent `urls`.
+            const urls = msg.requests ? msg.requests.map((r) => r.url) : msg.urls || [];
+            for (const u of urls) {
               try {
                 const r = await fetch(proxy(u));
                 const blob = await r.blob();

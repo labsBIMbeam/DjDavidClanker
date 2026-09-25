@@ -365,8 +365,11 @@ screenshots to `/tmp/clanker-*.png`.
 ## Deployment
 
 `npm run build` produces `dist/.nip5a-manifest.json` — a kind-35129 event
-with `d` tag, `path` hash, aggregate hash and the `requires` tags. To publish
-(Blossom upload + relay publish):
+with `d` tag, `path` hash, aggregate hash and the `requires` tags. The same
+values are stamped into `dist/index.html` as `<meta name="napplet-type">` and
+`<meta name="napplet-requires">` (`common,identity,link,media,outbox,relay,resource,storage`),
+so a host can read them from the artifact alone. The napplet uses only standard
+NAP domains, no custom host channels. To publish (Blossom upload + relay publish):
 
 ```bash
 napplet init --name dj-david-clanker --relay wss://… --server https://…

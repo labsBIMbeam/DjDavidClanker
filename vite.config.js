@@ -14,6 +14,30 @@ import { sandboxPurge } from './build/sandbox-purge.js';
 //                                                  localStorage, NIP-07 as fallbacks)
 // Only dist/ is a napplet; publish that one.
 
+/** The napplet's d-tag. */
+const NAPPLET_TYPE = 'dj-david-clanker';
+
+/**
+ * Host domains the code calls through src/lib/nap.js. `media` is optional
+ * (OS transport controls), but the code does use it when the shell offers it.
+ */
+const REQUIRES = ['common', 'identity', 'link', 'media', 'outbox', 'relay', 'resource', 'storage'];
+
+/**
+ * The manifest plugin keeps protocol metadata out of index.html, but hosts
+ * that read the artifact alone (the Nappelin Hangar check) look for these two
+ * tags, so the napplet build stamps them from the same values as the manifest.
+ */
+const meta = (name, content) => ({ tag: 'meta', attrs: { name, content }, injectTo: 'head-prepend' });
+const nappletMeta = () => ({
+  name: 'clanker-napplet-meta',
+  apply: 'build',
+  transformIndexHtml: () => [
+    meta('napplet-type', NAPPLET_TYPE),
+    meta('napplet-requires', REQUIRES.join(',')),
+  ],
+});
+
 /** The standalone artifact is not a napplet: drop the manifest sidecar the plugin writes. */
 const dropManifest = (outDir) => ({
   name: 'clanker-standalone-no-manifest',
@@ -37,9 +61,9 @@ export default defineConfig(({ mode }) => {
       assetsInlineLimit: 100_000_000,
     },
     plugins: [
-      ...(standalone ? [] : [sandboxPurge()]),
+      ...(standalone ? [] : [sandboxPurge(), nappletMeta()]),
       nip5aManifest({
-        nappletType: 'dj-david-clanker',
+        nappletType: NAPPLET_TYPE,
         title: 'DJ David Clanker',
         description:
           'Two-deck auto-DJ: phrase-aligned transitions, key detection and smart track selection. '
@@ -48,7 +72,7 @@ export default defineConfig(({ mode }) => {
         artifactMode: 'single-file',
         requires: {
           infer: false,
-          explicit: ['resource', 'identity', 'storage', 'outbox', 'relay', 'common', 'link'],
+          explicit: REQUIRES,
           mode: 'warn',
         },
       }),
