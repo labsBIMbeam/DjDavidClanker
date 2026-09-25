@@ -14,6 +14,42 @@ import { sandboxPurge } from './build/sandbox-purge.js';
 //                                                  localStorage, NIP-07 as fallbacks)
 // Only dist/ is a napplet; publish that one.
 
+/** The napplet's d-tag. */
+const NAPPLET_TYPE = 'dj-david-clanker';
+
+/**
+ * Every host domain the code asks the shell for through src/lib/nap.js,
+ * optional ones included: a shell grants only the domains a napplet declares.
+ * `media` (OS transport controls) is optional at runtime; the app degrades
+ * without it.
+ */
+const REQUIRES = ['common', 'identity', 'link', 'media', 'outbox', 'relay', 'resource', 'storage'];
+
+/**
+ * The manifest plugin keeps protocol metadata out of index.html, but hosts
+ * that read the artifact alone (the Nappelin Hangar check) look for these two
+ * tags, so the napplet build stamps them from the same values as the manifest.
+ *
+ * `injectTo: 'head'` keeps <meta charset> ahead of the napplet metas (the tags land
+ * after <title>).
+ * The hook must run `pre`: Vite injects the entry script into <head> before
+ * the normal hooks, and the single-file build later inlines ~310 KB of bundle
+ * into that tag, which would push the metas far past the first 1024 bytes a
+ * host scans.
+ */
+const meta = (name, content) => ({ tag: 'meta', attrs: { name, content }, injectTo: 'head' });
+const nappletMeta = () => ({
+  name: 'clanker-napplet-meta',
+  apply: 'build',
+  transformIndexHtml: {
+    order: 'pre',
+    handler: () => [
+      meta('napplet-type', NAPPLET_TYPE),
+      meta('napplet-requires', REQUIRES.join(',')),
+    ],
+  },
+});
+
 /** The standalone artifact is not a napplet: drop the manifest sidecar the plugin writes. */
 const dropManifest = (outDir) => ({
   name: 'clanker-standalone-no-manifest',
@@ -37,9 +73,9 @@ export default defineConfig(({ mode }) => {
       assetsInlineLimit: 100_000_000,
     },
     plugins: [
-      ...(standalone ? [] : [sandboxPurge()]),
+      ...(standalone ? [] : [sandboxPurge(), nappletMeta()]),
       nip5aManifest({
-        nappletType: 'dj-david-clanker',
+        nappletType: NAPPLET_TYPE,
         title: 'DJ David Clanker',
         description:
           'Two-deck auto-DJ: phrase-aligned transitions, key detection and smart track selection. '
@@ -48,7 +84,7 @@ export default defineConfig(({ mode }) => {
         artifactMode: 'single-file',
         requires: {
           infer: false,
-          explicit: ['resource', 'identity', 'storage', 'outbox', 'relay', 'common', 'link'],
+          explicit: REQUIRES,
           mode: 'warn',
         },
       }),
