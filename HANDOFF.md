@@ -16,7 +16,7 @@ a sandboxed single-purpose app that runs in an `iframe srcdoc` with
 `sandbox="allow-scripts"` and delegates signing, storage, relays *and network
 access* to a host shell.
 
-The build artifact is **a single `dist/index.html`** (~125 KB, everything
+The build artifact is **a single `dist/index.html`** (~350 KB, everything
 inline) plus `dist/.nip5a-manifest.json` (a kind-35129 event with path hashes
 and `requires` tags).
 

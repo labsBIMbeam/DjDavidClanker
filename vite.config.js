@@ -30,7 +30,8 @@ const REQUIRES = ['common', 'identity', 'link', 'media', 'outbox', 'relay', 'res
  * that read the artifact alone (the Nappelin Hangar check) look for these two
  * tags, so the napplet build stamps them from the same values as the manifest.
  *
- * `injectTo: 'head'` keeps <meta charset> first (the tags land after <title>).
+ * `injectTo: 'head'` keeps <meta charset> ahead of the napplet metas (the tags land
+ * after <title>).
  * The hook must run `pre`: Vite injects the entry script into <head> before
  * the normal hooks, and the single-file build later inlines ~310 KB of bundle
  * into that tag, which would push the metas far past the first 1024 bytes a
